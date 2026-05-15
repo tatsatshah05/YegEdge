@@ -1,0 +1,112 @@
+# =============================================================================
+# Strategy configuration — V1
+# =============================================================================
+# V1 ships with a single strategy: trend-following on 1-hour bars.
+# Mean-reversion sleeve is defined but disabled — enable only after the
+# trend-following strategy clears 30 paper sessions cleanly.
+# =============================================================================
+
+# Global strategy settings
+global:
+  # Risk capital allocation per strategy (must sum to 1.0).
+  allocations:
+    trend_following: 1.0
+    mean_reversion: 0.0       # disabled in V1; enable in V1.5
+
+  # Strategy-level cooldown after consecutive losses.
+  enable_strategy_cooldown: true
+
+# -----------------------------------------------------------------------------
+# Trend following (primary V1 strategy)
+# -----------------------------------------------------------------------------
+trend_following:
+  enabled: true
+  description: |
+    1-hour trend-following with EMA-crossover trigger,
+    ATR-based stops, and regime-aware gating.
+
+  # Signal definition
+  entry:
+    fast_ema_period: 20
+    slow_ema_period: 50
+    trend_filter_ema_period: 200     # don't long below 200 EMA on daily
+    adx_period: 14
+    min_adx_for_entry: 20            # require trending market
+    volume_filter_lookback: 20
+    min_volume_ratio: 1.1            # current volume vs 20-day avg
+
+  # Stop and target
+  stop:
+    type: "atr"
+    atr_period: 14
+    atr_multiple: 2.0
+
+  target:
+    type: "r_multiple"
+    initial_r: 2.0
+    trail_after_r: 1.5
+
+  # Regimes where this strategy is allowed to fire
+  allowed_regimes:
+    - bull_trend
+    - bear_trend            # short-side trend acceptable for V1.5; long-only in V1
+    - high_vol              # only with size reduction
+  blocked_regimes:
+    - sideways
+    - mean_reverting
+    - crisis
+    - avoid
+
+  # Long-only constraint for V1
+  long_only: true
+
+  # Per-strategy daily trade cap
+  max_trades_per_day: 2
+
+# -----------------------------------------------------------------------------
+# Mean reversion (V1.5+ — disabled by default)
+# -----------------------------------------------------------------------------
+mean_reversion:
+  enabled: false
+  description: |
+    Short-horizon (1-3 day) reversal on liquid large-caps when
+    RSI hits extreme and price extends N standard deviations from VWAP.
+
+  entry:
+    rsi_period: 14
+    rsi_oversold_threshold: 25
+    rsi_overbought_threshold: 75
+    vwap_lookback_bars: 30
+    min_deviation_sigma: 2.0
+
+  stop:
+    type: "atr"
+    atr_period: 14
+    atr_multiple: 1.5
+
+  target:
+    type: "vwap_revert"
+    fraction_revert: 0.5
+
+  allowed_regimes:
+    - sideways
+    - mean_reverting
+  blocked_regimes:
+    - bull_trend
+    - bear_trend
+    - high_vol
+    - crisis
+    - avoid
+
+  long_only: true
+  max_trades_per_day: 1
+
+# -----------------------------------------------------------------------------
+# Strategy-level risk overrides
+# -----------------------------------------------------------------------------
+# These tighten the global rules — they cannot loosen them.
+risk_overrides:
+  trend_following:
+    per_trade_risk_fraction: 0.005   # = global default
+  mean_reversion:
+    per_trade_risk_fraction: 0.003   # mean-rev is riskier per trade; size down

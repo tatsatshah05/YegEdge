@@ -1,0 +1,156 @@
+# =============================================================================
+# Risk rules — HARD LIMITS. Inviolable.
+# =============================================================================
+# These rules are the gatekeeper of the entire system. Loosen with extreme
+# caution and only after a fresh 60-session paper-trading window validates
+# the change. The risk manager rejects any trade that violates any rule below.
+#
+# Every rule has a corresponding pytest in tests/test_risk.py that DELIBERATELY
+# triggers it and confirms the rejection. If you add a rule here, add the test.
+# =============================================================================
+
+# --- Per-trade risk ---
+per_trade:
+  # Max loss on any single trade, as fraction of equity.
+  # 0.005 = 0.5%. Raise only after 30+ profitable paper sessions.
+  max_risk_fraction: 0.005
+
+  # Max position size, as fraction of NAV.
+  max_position_fraction: 0.10
+
+  # Minimum reward-to-risk ratio required to take a trade.
+  min_reward_risk: 1.5
+
+  # Stop loss is mandatory. ATR-based.
+  stop_loss:
+    type: "atr"            # atr | percent | fixed
+    atr_multiple: 2.0
+    atr_lookback: 14
+
+  # Take profit at R-multiples.
+  take_profit:
+    levels:                 # scale-out: 50% at 2R, 50% trailed beyond
+      - r_multiple: 2.0
+        fraction: 0.5
+      - r_multiple: 3.5
+        fraction: 0.5
+
+  # Break-even stop activates after this much unrealized gain.
+  break_even_after_r: 1.0
+
+# --- Portfolio-level limits ---
+portfolio:
+  # Maximum number of concurrent positions.
+  max_concurrent_positions: 6
+
+  # Maximum sector exposure as fraction of NAV.
+  max_sector_exposure: 0.15
+
+  # Maximum factor exposure (size, value, momentum, beta).
+  max_factor_exposure: 0.25
+
+  # Maximum pairwise correlation among positions (rolling 60-day returns).
+  max_pairwise_correlation: 0.70
+
+  # Minimum cash buffer at all times.
+  min_cash_fraction: 0.10
+
+# --- Loss caps ---
+loss_caps:
+  # Daily loss cap. Hit → stand down for the day.
+  max_daily_loss_fraction: 0.02
+
+  # Weekly loss cap. Hit → stand down for the week.
+  max_weekly_loss_fraction: 0.05
+
+  # Rolling 60-day drawdown. Hit → KILL SWITCH, manual restart required.
+  max_drawdown_fraction: 0.08
+
+# --- Cooldowns ---
+cooldowns:
+  # After N consecutive losers on a strategy, pause that strategy.
+  consecutive_loser_threshold: 3
+  consecutive_loser_pause_days: 3
+
+  # After sharp drawdown (X% in N sessions), halve all sizing.
+  sharp_drawdown_fraction: 0.04
+  sharp_drawdown_window_sessions: 5
+  sharp_drawdown_size_multiplier: 0.5
+  sharp_drawdown_duration_days: 14
+
+# --- Liquidity & quality filters ---
+filters:
+  # Minimum 20-day average dollar volume (INR).
+  min_dollar_volume_inr: 200_000_000   # ₹20 crore
+
+  # Maximum bid-ask spread as bps of mid-price.
+  max_spread_bps: 20
+
+  # Maximum slippage budget as fraction of expected reward.
+  max_slippage_fraction_of_reward: 0.30
+
+  # Block trades into earnings window.
+  earnings_blackout_days_before: 2
+  earnings_blackout_days_after: 2
+
+# --- Order frequency ---
+frequency:
+  # Maximum new orders per day across the whole system.
+  max_new_orders_per_day: 4
+
+  # Minimum minutes between orders on the same symbol.
+  symbol_cooldown_minutes: 30
+
+  # Order rate limit (orders per second). Below SEBI 10 OPS retail threshold.
+  max_orders_per_second: 2
+
+# --- Trading windows ---
+windows:
+  # IST. Avoid open volatility and close square-off frenzy.
+  trade_start_ist: "09:45"
+  trade_end_ist:   "14:45"
+
+  # All positions auto-squared-off by this time.
+  square_off_ist:  "15:15"
+
+  # No-trade days. Days of week (1=Mon, 7=Sun).
+  no_trade_weekdays: []   # currently none; F&O expiry day is filtered separately
+
+# --- Event blackouts ---
+event_blackouts:
+  # System stands down on these event types.
+  rbi_policy_day: true
+  budget_day: true
+  fno_expiry_day: true
+  major_macro_release: true        # NFP-equivalent for IN: CPI, GDP, IIP
+
+# --- Kill switch ---
+kill_switch:
+  # Auto-trigger conditions.
+  data_feed_outage_minutes: 10
+  consecutive_execution_errors: 3
+  drawdown_breach: true           # ties to max_drawdown_fraction above
+
+  # Manual restart only. No auto-recover.
+  auto_reset: false
+
+  # On trigger:
+  on_trigger:
+    cancel_open_orders: true
+    flatten_positions: false       # configurable; default is to hold and re-evaluate
+    alert_severity: "critical"
+    require_written_restart_checklist: true
+
+# --- Capital scaling rules (when to allow tighter/looser limits) ---
+capital_scaling:
+  # Risk per trade can be raised to 1.0% only after these conditions:
+  raise_to_1pct_after:
+    paper_sessions_completed: 30
+    paper_profit_factor_min: 1.3
+    paper_realized_drawdown_max: 0.05
+
+  # Live trading enabled only after:
+  live_enable_after:
+    paper_sessions_completed: 60
+    live_readiness_checklist_passed: true   # see docs/live_readiness.md
+    written_go_no_go_decision: true

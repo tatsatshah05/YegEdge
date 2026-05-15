@@ -1,0 +1,63 @@
+# --- Core data & compute ---
+pandas>=2.2.0
+polars>=1.9.0
+numpy>=1.26.0
+pyarrow>=17.0.0
+numba>=0.60.0
+
+# --- Indian market specifics ---
+upstox-python-sdk>=2.0.0          # Upstox official Python SDK
+nsepy>=0.8                         # NSE historical + corporate actions fallback
+exchange-calendars>=4.5            # Includes XBOM/XNSE calendars
+pyotp>=2.9.0                       # TOTP generation (manual login helper, not auto)
+
+# --- Storage ---
+duckdb>=1.1.0                      # In-process analytical DB for research
+sqlalchemy>=2.0.30                 # Journal ORM
+alembic>=1.13.0                    # Schema migrations
+
+# --- AI / LLM ---
+anthropic>=0.40.0                  # Claude SDK
+tenacity>=8.5.0                    # Retry logic for API calls
+
+# --- Configuration & validation ---
+pydantic>=2.8.0
+pydantic-settings>=2.4.0
+python-dotenv>=1.0.1
+pyyaml>=6.0.2
+
+# --- Logging & monitoring ---
+structlog>=24.4.0
+rich>=13.7.0                       # Pretty CLI output
+sentry-sdk>=2.13.0                 # Optional error tracking
+
+# --- Notifications ---
+python-telegram-bot>=21.0          # Telegram alerts
+
+# --- Dashboard ---
+streamlit>=1.38.0
+plotly>=5.24.0
+altair>=5.4.0
+
+# --- Indicators ---
+pandas-ta>=0.3.14b                 # Standard indicator library
+TA-Lib>=0.4.32                     # Faster C-backed alternative; optional
+
+# --- Backtesting (research stage) ---
+vectorbt>=0.26.0                   # Vectorized backtester for research
+# nautilus-trader                  # Production-grade event-driven; add when needed
+
+# --- Testing & quality ---
+pytest>=8.3.0
+pytest-cov>=5.0.0
+pytest-mock>=3.14.0
+hypothesis>=6.112.0
+black>=24.8.0
+isort>=5.13.0
+ruff>=0.6.0
+mypy>=1.11.0
+pre-commit>=3.8.0
+
+# --- Time & calendar ---
+pytz>=2024.1
+holidays>=0.56                     # Indian holidays

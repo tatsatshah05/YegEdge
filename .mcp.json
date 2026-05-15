@@ -1,0 +1,20 @@
+{
+  "_comment": "MCP server config for Claude Code. Most servers are commented out; enable as needed. Built-in tools (file edit, bash, web search) cover most workflows — only add MCP servers when they provide real value.",
+
+  "mcpServers": {
+    "_github_example": {
+      "_comment": "Uncomment and configure when you set up GitHub for the project. Useful for PR review, issue management.",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "ghp_PLACEHOLDER"
+      }
+    },
+
+    "_sqlite_journal_example": {
+      "_comment": "Uncomment after Phase 1 produces a journal database. Lets Claude Code query the trade journal in natural language during reviews.",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-sqlite", "--db-path", "./data/journal.db"]
+    }
+  }
+}

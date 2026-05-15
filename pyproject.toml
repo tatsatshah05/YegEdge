@@ -1,0 +1,98 @@
+[project]
+name = "yegedge"
+version = "0.1.0"
+description = "YegEdge — AI-assisted, risk-first, paper-trading-first trading agent for Indian markets (NSE)"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{ name = "Tatsat Shah" }]
+license = { text = "Personal — see README" }
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["agent*", "dashboard*"]
+exclude = ["tests*", "docs*"]
+
+# ---------------------------------------------------------------------------
+# Black
+# ---------------------------------------------------------------------------
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+
+# ---------------------------------------------------------------------------
+# isort
+# ---------------------------------------------------------------------------
+[tool.isort]
+profile = "black"
+line_length = 100
+known_first_party = ["agent", "dashboard", "config"]
+
+# ---------------------------------------------------------------------------
+# Ruff
+# ---------------------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = [".venv", "build", "dist"]
+
+[tool.ruff.lint]
+select = [
+  "E",    # pycodestyle errors
+  "W",    # pycodestyle warnings
+  "F",    # pyflakes
+  "I",    # isort
+  "N",    # pep8-naming
+  "B",    # bugbear
+  "UP",   # pyupgrade
+  "S",    # bandit security
+  "RUF",  # ruff-specific
+]
+ignore = [
+  "S101",  # `assert` is fine in tests
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["S", "N"]
+
+# ---------------------------------------------------------------------------
+# mypy
+# ---------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_unused_ignores = true
+warn_return_any = true
+warn_unreachable = true
+disallow_untyped_decorators = true
+no_implicit_reexport = true
+show_error_codes = true
+
+[[tool.mypy.overrides]]
+module = ["pandas_ta.*", "vectorbt.*", "talib.*", "upstox_python_sdk.*"]
+ignore_missing_imports = true
+
+# ---------------------------------------------------------------------------
+# pytest
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+  "-v",
+  "--strict-markers",
+  "--strict-config",
+  "--cov=agent",
+  "--cov-report=term-missing",
+  "--cov-fail-under=70",
+]
+markers = [
+  "slow: tests that take >2s",
+  "integration: tests that hit broker APIs or external services",
+  "risk: tests of risk-manager invariants (run on every commit)",
+]

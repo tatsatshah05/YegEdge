@@ -1,0 +1,125 @@
+# =============================================================================
+# Trading universe — NSE equity intraday only (V1)
+# =============================================================================
+# Curated liquid Nifty 50 / Next 50 names. Universe is intentionally narrow
+# in V1 — liquidity quality > breadth at this capital size.
+# =============================================================================
+
+exchange: "NSE"
+segment: "EQ"             # equity cash; intraday MIS orders only in V1
+
+# Bar timeframes the system uses.
+timeframes:
+  primary: "60m"          # decisions made on 1-hour bars
+  execution: "15m"        # entry timing on 15-min
+  daily: "1d"             # for regime, drawdown, end-of-day reporting
+
+# Lookback history (bars).
+history_bars:
+  60m: 8000               # ~4 years
+  15m: 32000              # ~2 years
+  1d:  1250               # ~5 years
+
+# Universe — Nifty 50 majors (high liquidity, low spread).
+symbols:
+  # Banks & financials
+  - HDFCBANK
+  - ICICIBANK
+  - SBIN
+  - KOTAKBANK
+  - AXISBANK
+  - BAJFINANCE
+
+  # IT
+  - TCS
+  - INFY
+  - WIPRO
+  - HCLTECH
+  - TECHM
+
+  # Energy / oil
+  - RELIANCE
+  - ONGC
+  - NTPC
+  - POWERGRID
+
+  # FMCG / consumer
+  - HINDUNILVR
+  - ITC
+  - NESTLEIND
+  - BRITANNIA
+
+  # Auto
+  - MARUTI
+  - M&M
+  - TATAMOTORS
+  - BAJAJ-AUTO
+
+  # Metals
+  - TATASTEEL
+  - JSWSTEEL
+  - HINDALCO
+
+  # Pharma
+  - SUNPHARMA
+  - DRREDDY
+  - CIPLA
+
+  # Industrial / cement
+  - LT
+  - ULTRACEMCO
+  - GRASIM
+
+  # Telecom
+  - BHARTIARTL
+
+# Benchmark series (always fetched for regime detection and relative strength).
+benchmarks:
+  - NIFTY50         # broad market benchmark
+  - NIFTYBANK       # banking sector
+  - INDIAVIX        # volatility regime
+
+# Sector classifications — used for sector-exposure caps.
+sectors:
+  HDFCBANK: financials
+  ICICIBANK: financials
+  SBIN: financials
+  KOTAKBANK: financials
+  AXISBANK: financials
+  BAJFINANCE: financials
+  TCS: it
+  INFY: it
+  WIPRO: it
+  HCLTECH: it
+  TECHM: it
+  RELIANCE: energy
+  ONGC: energy
+  NTPC: utilities
+  POWERGRID: utilities
+  HINDUNILVR: fmcg
+  ITC: fmcg
+  NESTLEIND: fmcg
+  BRITANNIA: fmcg
+  MARUTI: auto
+  M&M: auto
+  TATAMOTORS: auto
+  BAJAJ-AUTO: auto
+  TATASTEEL: metals
+  JSWSTEEL: metals
+  HINDALCO: metals
+  SUNPHARMA: pharma
+  DRREDDY: pharma
+  CIPLA: pharma
+  LT: industrial
+  ULTRACEMCO: industrial
+  GRASIM: industrial
+  BHARTIARTL: telecom
+
+# ETFs available for hedging / cash-equivalent positioning (V2+).
+hedging_instruments:
+  - NIFTYBEES
+  - BANKBEES
+  - LIQUIDBEES        # cash proxy
+
+# Universe-rebalance cadence — when to re-check membership.
+rebalance_cadence: "quarterly"
