@@ -48,6 +48,7 @@ vectorbt>=0.26.0                   # Vectorized backtester for research
 # nautilus-trader                  # Production-grade event-driven; add when needed
 
 # --- Testing & quality ---
+click>=8.1.0                       # CLI framework (used by agent.cli)
 pytest>=8.3.0
 pytest-cov>=5.0.0
 pytest-mock>=3.14.0
