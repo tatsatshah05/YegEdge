@@ -100,9 +100,7 @@ class RegimeDetector:
         NaN guard: fill_nan().fill_null() covers both Polars NaN and null so
         sklearn never receives NaN/inf from zero-close or zero-prior-close rows.
         """
-        adx = (
-            df["adx_14"].fill_nan(0.0).fill_null(0.0).to_numpy().astype(np.float64)
-        )
+        adx = df["adx_14"].fill_nan(0.0).fill_null(0.0).to_numpy().astype(np.float64)
         atr_pct = (
             (df["atr_14"] / df["close"] * 100.0)
             .fill_nan(0.0)

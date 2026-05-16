@@ -156,7 +156,7 @@ def test_fit_and_predict_tolerates_nan_in_features() -> None:
     df = df.with_columns(pl.Series("adx_14", adx_with_nan, dtype=pl.Float64))
 
     rd = RegimeDetector()
-    rd.fit(df)   # must not raise
+    rd.fit(df)  # must not raise
     assert rd.is_fit is True
     result = rd.predict(df)  # must not raise
     valid_values = {r.value for r in Regime}

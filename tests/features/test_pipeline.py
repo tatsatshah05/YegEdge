@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import polars as pl
-import pytest
 
 from agent.features.pipeline import FeaturePipeline
 from agent.features.regime import Regime, RegimeDetector
