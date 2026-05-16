@@ -30,8 +30,17 @@ class Bar:
     data_quality: DataQuality
 
     def __post_init__(self) -> None:
+        import datetime as _dt
+
         if self.timestamp.tzinfo is None:
             raise ValueError("Bar.timestamp must be timezone-aware (IST)")
+        # IST is UTC+05:30 (no DST). Any timezone not equal to +05:30 offset is wrong.
+        ist_offset = _dt.timedelta(hours=5, minutes=30)
+        actual_offset = self.timestamp.utcoffset()
+        if actual_offset != ist_offset:
+            raise ValueError(
+                f"Bar.timestamp must be IST (UTC+05:30), got UTC offset {actual_offset!r}"
+            )
 
 
 @dataclass(frozen=True, slots=True)

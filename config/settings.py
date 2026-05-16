@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from decimal import Decimal
 from pathlib import Path
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -17,8 +19,17 @@ class AppSettings(BaseSettings):
     # Trading mode (CRITICAL: live_trading_enabled defaults to False — never change default)
     live_trading_enabled: bool = False
     paper_sessions_completed: int = 0
-    paper_starting_capital: float = 83000.0
-    max_monthly_api_spend_inr: float = 1500.0
+    paper_starting_capital: Decimal = Decimal("83000.00")
+    max_monthly_api_spend_inr: Decimal = Decimal("1500.00")
+
+    @model_validator(mode="after")
+    def require_60_paper_sessions_before_live(self) -> "AppSettings":
+        if self.live_trading_enabled and self.paper_sessions_completed < 60:
+            raise ValueError(
+                f"live_trading_enabled=True requires paper_sessions_completed >= 60, "
+                f"got {self.paper_sessions_completed}"
+            )
+        return self
 
     # Data paths
     parquet_cache_dir: Path = Path("./data/cache")
