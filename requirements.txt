@@ -43,6 +43,7 @@ plotly>=5.24.0
 altair>=5.4.0
 
 # --- Indicators ---
+scikit-learn>=1.4              # KMeans for regime detection
 pandas-ta>=0.3.14b                 # Standard indicator library
 TA-Lib>=0.4.32                     # Faster C-backed alternative; optional
 
