@@ -350,3 +350,42 @@ def test_add_vwap_preserves_original_columns() -> None:
     result = add_vwap(df)
     for col in df.columns:
         assert col in result.columns
+
+
+def test_add_vwap_zero_volume_bar_produces_no_nan() -> None:
+    """Zero-volume bars (circuit limits) must not produce NaN in vwap."""
+    IST = ZoneInfo("Asia/Kolkata")
+    n = 10
+    timestamps = [
+        datetime(2024, 1, 2, 9, 15, tzinfo=IST) + timedelta(minutes=60 * i) for i in range(n)
+    ]
+    df = pl.DataFrame(
+        {
+            "symbol": ["TEST"] * n,
+            "timeframe": ["60m"] * n,
+            "timestamp": pl.Series(timestamps, dtype=pl.Datetime("us", "Asia/Kolkata")),
+            "open": pl.Series([1500.0] * n, dtype=pl.Float64),
+            "high": pl.Series([1500.0] * n, dtype=pl.Float64),
+            "low": pl.Series([1500.0] * n, dtype=pl.Float64),
+            "close": pl.Series([1500.0] * n, dtype=pl.Float64),
+            "volume": pl.Series([0] * n, dtype=pl.Int64),
+            "value": pl.Series([0.0] * n, dtype=pl.Float64),
+        }
+    )
+    result = add_vwap(df)
+    vals = result["vwap"].to_list()
+    nan_count = sum(1 for v in vals if isinstance(v, float) and math.isnan(v))
+    assert nan_count == 0, f"VWAP produced {nan_count} NaN values on zero-volume bars"
+
+
+def test_add_vwap_unsorted_input_produces_correct_result() -> None:
+    """add_vwap must produce correct VWAP even if input is not sorted by timestamp."""
+    df_sorted = make_ohlcv_df([1000.0, 1010.0, 1020.0, 1030.0, 1040.0])
+    df_shuffled = df_sorted.sample(fraction=1.0, shuffle=True, seed=42)
+    result_sorted = add_vwap(df_sorted)
+    result_shuffled = add_vwap(df_shuffled).sort("timestamp")
+    # After sorting the shuffled result by timestamp, VWAP values should match
+    vwap_sorted = result_sorted["vwap"].to_list()
+    vwap_shuffled = result_shuffled["vwap"].to_list()
+    for s, sh in zip(vwap_sorted, vwap_shuffled, strict=True):
+        assert abs(s - sh) < 0.001, f"VWAP differs: sorted={s}, shuffled={sh}"

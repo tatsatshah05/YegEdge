@@ -181,13 +181,17 @@ def add_vwap(df: pl.DataFrame) -> pl.DataFrame:
     session = pl.col("timestamp").dt.date()
     tp = (pl.col("high") + pl.col("low") + pl.col("close")) / 3.0
     return (
-        df.with_columns(tp.alias("_tp"))
+        df.sort("timestamp")
+        .with_columns(tp.alias("_tp"))
         .with_columns((pl.col("_tp") * pl.col("volume")).alias("_tp_vol"))
         .with_columns(
-            (
+            pl.when(pl.col("volume").cast(pl.Float64).cum_sum().over(session) == 0.0)
+            .then(pl.col("_tp"))
+            .otherwise(
                 pl.col("_tp_vol").cum_sum().over(session)
                 / pl.col("volume").cast(pl.Float64).cum_sum().over(session)
-            ).alias("vwap")
+            )
+            .alias("vwap")
         )
         .drop(["_tp", "_tp_vol"])
     )
