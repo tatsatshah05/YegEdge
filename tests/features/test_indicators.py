@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 import polars as pl
 import pytest
 
-from agent.features.indicators import add_adx, add_atr, add_ema, add_rsi
+from agent.features.indicators import add_adx, add_atr, add_ema, add_rsi, add_vwap
 from tests.features.conftest import make_ohlcv_df
 
 # ---------------------------------------------------------------------------
@@ -298,3 +298,55 @@ def test_add_adx_invalid_period_raises() -> None:
     df = make_ohlcv_df([1000.0] * 10)
     with pytest.raises(ValueError, match="period"):
         add_adx(df, period=1)
+
+
+# ---------------------------------------------------------------------------
+# VWAP tests
+# ---------------------------------------------------------------------------
+
+
+def test_add_vwap_returns_vwap_column() -> None:
+    df = make_ohlcv_df([1000.0 + i for i in range(20)])
+    result = add_vwap(df)
+    assert "vwap" in result.columns
+
+
+def test_add_vwap_within_session_high_low_bounds() -> None:
+    """VWAP on a constant-price session lies between that session's low and high."""
+    # Use constant price so VWAP = typical_price = constant, within [low, high]
+    df = make_ohlcv_df([1500.0] * 30)
+    result = add_vwap(df)
+    vwap_vals = result["vwap"].to_list()
+    lows = result["low"].to_list()
+    highs = result["high"].to_list()
+    for v, lo, hi in zip(vwap_vals, lows, highs, strict=False):
+        if v is not None:
+            assert lo <= v <= hi, f"VWAP {v} outside [{lo}, {hi}]"
+
+
+def test_add_vwap_resets_between_sessions(two_session_df: pl.DataFrame) -> None:
+    """VWAP must reset to the first bar's typical price at each session boundary."""
+    result = add_vwap(two_session_df)
+    result = result.with_columns(pl.col("timestamp").dt.date().alias("_date"))
+    for date_val in result["_date"].unique().sort().to_list():
+        session = result.filter(pl.col("_date") == date_val)
+        first_row = session.row(0, named=True)
+        tp0 = (first_row["high"] + first_row["low"] + first_row["close"]) / 3.0
+        vwap0 = first_row["vwap"]
+        assert (
+            abs(vwap0 - tp0) < 0.001
+        ), f"Session {date_val}: VWAP[0]={vwap0} should equal typical_price[0]={tp0}"
+
+
+def test_add_vwap_no_temp_columns_leaked() -> None:
+    df = make_ohlcv_df([1000.0 + i for i in range(20)])
+    result = add_vwap(df)
+    leaked = [c for c in result.columns if c.startswith("_")]
+    assert leaked == [], f"Leaked temp columns: {leaked}"
+
+
+def test_add_vwap_preserves_original_columns() -> None:
+    df = make_ohlcv_df([1000.0 + i for i in range(20)])
+    result = add_vwap(df)
+    for col in df.columns:
+        assert col in result.columns

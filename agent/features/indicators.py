@@ -162,3 +162,32 @@ def add_adx(df: pl.DataFrame, period: int = 14) -> pl.DataFrame:
         .with_columns(pl.col(_dx).ewm_mean(com=period - 1, adjust=False).alias(f"adx_{period}"))
         .drop([_tr, _pdm, _mdm, _dx])
     )
+
+
+def add_vwap(df: pl.DataFrame) -> pl.DataFrame:
+    """Add a session-VWAP column ``vwap`` to *df*.
+
+    VWAP = cumulative(typical_price * volume) / cumulative(volume), reset each
+    calendar date.  The typical price is (high + low + close) / 3.
+
+    Only meaningful for intraday timeframes (15m, 60m).  On daily bars, VWAP
+    equals the bar's typical price (degenerate single-bar case).
+
+    Parameters
+    ----------
+    df:     DataFrame with ``high``, ``low``, ``close``, ``volume``, ``timestamp``
+            columns.  ``timestamp`` must be timezone-aware (IST).
+    """
+    session = pl.col("timestamp").dt.date()
+    tp = (pl.col("high") + pl.col("low") + pl.col("close")) / 3.0
+    return (
+        df.with_columns(tp.alias("_tp"))
+        .with_columns((pl.col("_tp") * pl.col("volume")).alias("_tp_vol"))
+        .with_columns(
+            (
+                pl.col("_tp_vol").cum_sum().over(session)
+                / pl.col("volume").cast(pl.Float64).cum_sum().over(session)
+            ).alias("vwap")
+        )
+        .drop(["_tp", "_tp_vol"])
+    )
