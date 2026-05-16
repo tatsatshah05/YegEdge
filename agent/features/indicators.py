@@ -139,8 +139,14 @@ def add_adx(df: pl.DataFrame, period: int = 14) -> pl.DataFrame:
         )
         .with_columns(
             [
-                (100.0 * pl.col(_pdm) / pl.col(_tr)).alias(f"plus_di_{period}"),
-                (100.0 * pl.col(_mdm) / pl.col(_tr)).alias(f"minus_di_{period}"),
+                pl.when(pl.col(_tr) == 0.0)
+                .then(pl.lit(0.0))
+                .otherwise(100.0 * pl.col(_pdm) / pl.col(_tr))
+                .alias(f"plus_di_{period}"),
+                pl.when(pl.col(_tr) == 0.0)
+                .then(pl.lit(0.0))
+                .otherwise(100.0 * pl.col(_mdm) / pl.col(_tr))
+                .alias(f"minus_di_{period}"),
             ]
         )
         .with_columns(

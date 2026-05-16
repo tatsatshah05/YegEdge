@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+import math
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
+
+import polars as pl
 import pytest
 
 from agent.features.indicators import add_adx, add_atr, add_ema, add_rsi
@@ -159,15 +164,11 @@ def test_add_atr_is_non_negative() -> None:
 
 def test_add_atr_constant_series_is_near_zero_after_warmup() -> None:
     """On a perfectly flat series (no gaps, constant OHLCV), ATR should approach zero."""
-    from datetime import datetime, timedelta
-    from zoneinfo import ZoneInfo
-
     IST = ZoneInfo("Asia/Kolkata")
     n = 60
     timestamps = [
         datetime(2024, 1, 2, 9, 15, tzinfo=IST) + timedelta(minutes=60 * i) for i in range(n)
     ]
-    import polars as pl
 
     df = pl.DataFrame(
         {
@@ -214,6 +215,33 @@ def test_add_atr_invalid_period_raises() -> None:
 # ---------------------------------------------------------------------------
 # ADX tests
 # ---------------------------------------------------------------------------
+
+
+def test_add_adx_circuit_breaker_bars_produce_no_nan() -> None:
+    """Bars with H=L=C (NSE circuit-breaker / halt) must not produce NaN in any ADX column."""
+    IST = ZoneInfo("Asia/Kolkata")
+    n = 60
+    timestamps = [
+        datetime(2024, 1, 2, 9, 15, tzinfo=IST) + timedelta(minutes=60 * i) for i in range(n)
+    ]
+    df = pl.DataFrame(
+        {
+            "symbol": ["TEST"] * n,
+            "timeframe": ["60m"] * n,
+            "timestamp": pl.Series(timestamps, dtype=pl.Datetime("us", "Asia/Kolkata")),
+            "open": pl.Series([1500.0] * n, dtype=pl.Float64),
+            "high": pl.Series([1500.0] * n, dtype=pl.Float64),
+            "low": pl.Series([1500.0] * n, dtype=pl.Float64),
+            "close": pl.Series([1500.0] * n, dtype=pl.Float64),
+            "volume": pl.Series([100_000] * n, dtype=pl.Int64),
+            "value": pl.Series([150_000_000.0] * n, dtype=pl.Float64),
+        }
+    )
+    result = add_adx(df, period=14)
+    for col in ("adx_14", "plus_di_14", "minus_di_14"):
+        vals = result[col].to_list()
+        nan_count = sum(1 for v in vals if isinstance(v, float) and math.isnan(v))
+        assert nan_count == 0, f"{col} contains {nan_count} NaN values on circuit-breaker bars"
 
 
 def test_add_adx_returns_expected_columns() -> None:
