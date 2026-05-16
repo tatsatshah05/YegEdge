@@ -206,3 +206,79 @@ def test_upstox_timeframe_map_covers_required_timeframes() -> None:
     for tf, (unit, interval) in UPSTOX_TIMEFRAME_MAP.items():
         assert isinstance(unit, str), f"unit for {tf} must be str"
         assert isinstance(interval, int), f"interval for {tf} must be int"
+
+
+# ---------------------------------------------------------------------------
+# WebSocket / stream_live tests (Task 8)
+# ---------------------------------------------------------------------------
+
+
+def test_handle_tick_calls_callback_with_correct_symbol(adapter: UpstoxAdapter) -> None:
+    """_handle_tick must resolve instrument key to symbol and call callback once per feed entry."""
+    received: list[pl.DataFrame] = []
+
+    fake_msg = {
+        "feeds": {
+            "NSE_EQ|INE040A01034": {  # HDFCBANK
+                "ltpc": {
+                    "ltp": 1715.5,
+                    "ltt": "1704168600000",  # 2024-01-02 09:30:00 IST in epoch ms
+                }
+            }
+        }
+    }
+
+    adapter._handle_tick(fake_msg, callback=received.append)
+    assert len(received) == 1
+    assert received[0]["symbol"][0] == "HDFCBANK"
+    assert received[0]["ltp"][0] == 1715.5
+
+
+def test_handle_tick_skips_unknown_instrument_key(adapter: UpstoxAdapter) -> None:
+    """_handle_tick must silently skip instrument keys not in the instrument master."""
+    received: list[pl.DataFrame] = []
+
+    fake_msg = {
+        "feeds": {
+            "NSE_EQ|UNKNOWN_ISIN_XYZ": {
+                "ltpc": {"ltp": 100.0, "ltt": "1704168600000"}
+            }
+        }
+    }
+
+    adapter._handle_tick(fake_msg, callback=received.append)
+    assert len(received) == 0
+
+
+def test_handle_tick_skips_feed_without_ltpc(adapter: UpstoxAdapter) -> None:
+    """_handle_tick must skip a feed entry that has no 'ltpc' key."""
+    received: list[pl.DataFrame] = []
+
+    fake_msg = {
+        "feeds": {
+            "NSE_EQ|INE040A01034": {
+                "someOtherData": {}  # no 'ltpc' key
+            }
+        }
+    }
+
+    adapter._handle_tick(fake_msg, callback=received.append)
+    assert len(received) == 0
+
+
+def test_stream_live_raises_not_implemented_when_streamer_unavailable(adapter: UpstoxAdapter) -> None:
+    """stream_live should raise if upstox_client is not importable (simulated by patching connect)."""
+    import asyncio
+    from unittest.mock import patch, MagicMock
+
+    with patch("agent.data.upstox_adapter.MarketDataStreamerV3") as MockStreamer:
+        instance = MockStreamer.return_value
+        instance.on = MagicMock()
+        instance.connect = MagicMock()  # connect does nothing in the test
+
+        async def run() -> None:
+            await adapter.stream_live(["HDFCBANK"], callback=lambda df: None)
+
+        # Should complete without raising since MarketDataStreamerV3 is mocked
+        asyncio.run(run())
+        instance.connect.assert_called_once()

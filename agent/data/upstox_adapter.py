@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import gzip
 import json
 from collections.abc import Callable
@@ -12,6 +13,8 @@ from zoneinfo import ZoneInfo
 import polars as pl
 import requests
 import structlog
+import upstox_client
+from upstox_client.feeder.market_data_streamer_v3 import MarketDataStreamerV3
 
 from agent.data.broker_adapter import BrokerAdapter
 from agent.data.types import Discrepancy, Order, OrderAck, Position
@@ -318,8 +321,107 @@ class UpstoxAdapter(BrokerAdapter):
         symbols: list[str],
         callback: Callable[[pl.DataFrame], None],
     ) -> None:
-        """WebSocket live tick stream — implemented in Task 8."""
-        raise NotImplementedError("Implemented in Task 8")
+        """WebSocket live tick stream using Upstox MarketDataStreamerV3.
+
+        Subscribes to LTPC (Last Trade Price + Change) ticks for the given
+        symbols and invokes *callback* with a one-row ``pl.DataFrame`` for each
+        tick received.  The coroutine stays alive until cancelled by the caller.
+
+        Parameters
+        ----------
+        symbols:
+            NSE trading symbols to subscribe to, e.g. ``["HDFCBANK", "TCS"]``.
+        callback:
+            Callable invoked for every valid tick.  Receives a one-row DataFrame
+            with columns: symbol (Utf8), ltp (Float64), timestamp (Datetime[us, Asia/Kolkata]).
+        """
+        instrument_keys = [self._symbol_to_instrument_key(s) for s in symbols]
+
+        config = upstox_client.Configuration()
+        config.access_token = self._access_token
+        api_client = upstox_client.ApiClient(configuration=config)
+
+        streamer = MarketDataStreamerV3(
+            api_client=api_client,
+            instrumentKeys=instrument_keys,
+            mode="ltpc",
+        )
+
+        streamer.on("message", lambda msg: self._handle_tick(msg, callback=callback))
+
+        logger.info(
+            "upstox_adapter.stream_live.connecting",
+            symbols=symbols,
+            instrument_keys=instrument_keys,
+        )
+
+        # streamer.connect() is synchronous and blocks until disconnected.
+        # Wrap in run_in_executor so it doesn't block the asyncio event loop.
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, streamer.connect)
+
+        logger.info("upstox_adapter.stream_live.disconnected", symbols=symbols)
+
+    def _handle_tick(
+        self,
+        msg: dict,  # type: ignore[type-arg]
+        *,
+        callback: Callable[[pl.DataFrame], None],
+    ) -> None:
+        """Parse a raw WebSocket protobuf-decoded message and fire *callback*.
+
+        Each entry in ``msg["feeds"]`` corresponds to one instrument.  A
+        one-row DataFrame is emitted per valid LTPC feed entry.
+
+        Errors in individual feed entries are caught and logged so a single
+        bad tick never crashes the stream.
+        """
+        try:
+            for instrument_key, feed_data in msg.get("feeds", {}).items():
+                try:
+                    symbol = self._instrument_key_to_symbol(instrument_key)
+                except KeyError:
+                    logger.debug(
+                        "upstox_adapter.handle_tick.unknown_instrument_key",
+                        instrument_key=instrument_key,
+                    )
+                    continue
+
+                try:
+                    ltp_data = feed_data["ltpc"]
+                except KeyError:
+                    logger.debug(
+                        "upstox_adapter.handle_tick.no_ltpc",
+                        symbol=symbol,
+                        instrument_key=instrument_key,
+                    )
+                    continue
+
+                if "ltt" not in ltp_data:
+                    logger.debug(
+                        "upstox_adapter.handle_tick.no_ltt",
+                        symbol=symbol,
+                    )
+                    continue
+
+                ltp = float(ltp_data["ltp"])
+                ts = datetime.fromtimestamp(int(ltp_data["ltt"]) / 1000, tz=IST)
+
+                row_df = pl.DataFrame(
+                    {
+                        "symbol": [symbol],
+                        "ltp": pl.Series([ltp], dtype=pl.Float64),
+                        "timestamp": pl.Series([ts], dtype=pl.Datetime("us", "Asia/Kolkata")),
+                    }
+                )
+                callback(row_df)
+
+        except Exception as exc:
+            logger.error(
+                "upstox_adapter.handle_tick.error",
+                error=str(exc),
+                msg_keys=list(msg.keys()) if isinstance(msg, dict) else None,
+            )
 
     def place_order(self, order: Order) -> OrderAck:
         """Order placement — implemented in Phase 5."""
