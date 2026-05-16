@@ -90,9 +90,7 @@ class ParquetCache:
             if not path.exists():
                 continue
             df = pl.read_parquet(path)
-            filtered = df.filter(
-                (pl.col("timestamp") >= start) & (pl.col("timestamp") <= end)
-            )
+            filtered = df.filter((pl.col("timestamp") >= start) & (pl.col("timestamp") <= end))
             if len(filtered) > 0:
                 frames.append(filtered)
 

@@ -23,7 +23,7 @@ class AppSettings(BaseSettings):
     max_monthly_api_spend_inr: Decimal = Decimal("1500.00")
 
     @model_validator(mode="after")
-    def require_60_paper_sessions_before_live(self) -> "AppSettings":
+    def require_60_paper_sessions_before_live(self) -> AppSettings:
         if self.live_trading_enabled and self.paper_sessions_completed < 60:
             raise ValueError(
                 f"live_trading_enabled=True requires paper_sessions_completed >= 60, "

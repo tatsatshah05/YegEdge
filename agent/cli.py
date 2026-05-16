@@ -158,9 +158,7 @@ def verify(symbol: str | None, timeframe: str | None) -> None:
     report = cache.coverage_report()
 
     if not report:
-        console.print(
-            "[yellow]No cached data found. Run `python -m agent refresh` first.[/yellow]"
-        )
+        console.print("[yellow]No cached data found. Run `python -m agent refresh` first.[/yellow]")
         sys.exit(1)
 
     symbols: list[str] = [symbol] if symbol else universe.all_symbols()
@@ -215,9 +213,7 @@ def verify(symbol: str | None, timeframe: str | None) -> None:
                 continue
 
             validated_df = validator.validate(df)
-            quality_counts = (
-                validated_df["data_quality"].value_counts().to_dicts()
-            )
+            quality_counts = validated_df["data_quality"].value_counts().to_dicts()
             count_map: dict[str, int] = {
                 row["data_quality"]: row["count"] for row in quality_counts
             }

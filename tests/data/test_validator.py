@@ -4,7 +4,6 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import polars as pl
-import pytest
 
 from agent.data.types import DataQuality
 from agent.data.validator import DataValidator
@@ -39,23 +38,17 @@ def test_valid_bar_gets_ok_quality() -> None:
 
 
 def test_high_below_open_gives_suspect() -> None:
-    df = DataValidator().validate(
-        _make_df(open=1700.0, high=1680.0, low=1660.0, close=1670.0)
-    )
+    df = DataValidator().validate(_make_df(open=1700.0, high=1680.0, low=1660.0, close=1670.0))
     assert df["data_quality"][0] == DataQuality.SUSPECT.value
 
 
 def test_high_below_close_gives_suspect() -> None:
-    df = DataValidator().validate(
-        _make_df(high=1700.0, close=1750.0)
-    )
+    df = DataValidator().validate(_make_df(high=1700.0, close=1750.0))
     assert df["data_quality"][0] == DataQuality.SUSPECT.value
 
 
 def test_low_above_open_gives_suspect() -> None:
-    df = DataValidator().validate(
-        _make_df(low=1750.0, open=1700.0)
-    )
+    df = DataValidator().validate(_make_df(low=1750.0, open=1700.0))
     assert df["data_quality"][0] == DataQuality.SUSPECT.value
 
 

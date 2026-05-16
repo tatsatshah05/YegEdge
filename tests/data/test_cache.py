@@ -5,7 +5,6 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import polars as pl
-import pytest
 
 from agent.data.cache import ParquetCache
 

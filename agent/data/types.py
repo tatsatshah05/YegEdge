@@ -3,13 +3,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
-from enum import Enum
+from enum import StrEnum
 from typing import Literal
 
 Timeframe = Literal["15m", "60m", "1d"]
 
 
-class DataQuality(str, Enum):
+class DataQuality(StrEnum):
     OK = "ok"
     PARTIAL = "partial"
     SUSPECT = "suspect"

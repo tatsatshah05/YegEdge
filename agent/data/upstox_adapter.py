@@ -32,9 +32,7 @@ UPSTOX_TIMEFRAME_MAP: Final[dict[str, tuple[str, int]]] = {
     "1d": ("days", 1),
 }
 
-_INSTRUMENTS_CDN_URL = (
-    "https://assets.upstox.com/market-quote/instruments/exchange/NSE.json.gz"
-)
+_INSTRUMENTS_CDN_URL = "https://assets.upstox.com/market-quote/instruments/exchange/NSE.json.gz"
 
 _OHLCV_SCHEMA: Final[dict[str, type[pl.DataType]]] = {
     "symbol": pl.Utf8,
@@ -98,9 +96,7 @@ class UpstoxAdapter(BrokerAdapter):
                         path=str(p),
                         error=str(exc),
                     )
-                    raise RuntimeError(
-                        f"Failed to read instrument cache from {p}: {exc}"
-                    ) from exc
+                    raise RuntimeError(f"Failed to read instrument cache from {p}: {exc}") from exc
                 self._validate_instrument_columns(df)
                 return df
             logger.info(
@@ -266,7 +262,8 @@ class UpstoxAdapter(BrokerAdapter):
                     candle=candle,
                 )
                 continue
-            ts_str, o, h, l, c, vol, val = candle[0], candle[1], candle[2], candle[3], candle[4], candle[5], candle[6]
+            ts_str = candle[0]
+            o, h, lo, c, vol, val = candle[1], candle[2], candle[3], candle[4], candle[5], candle[6]
             ts = datetime.fromisoformat(ts_str)
             if ts.tzinfo is None:
                 logger.error(
@@ -282,7 +279,7 @@ class UpstoxAdapter(BrokerAdapter):
             timestamps.append(ts.astimezone(IST))
             opens.append(float(o))
             highs.append(float(h))
-            lows.append(float(l))
+            lows.append(float(lo))
             closes.append(float(c))
             volumes.append(round(float(vol)))
             values.append(float(val))

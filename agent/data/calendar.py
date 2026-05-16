@@ -82,7 +82,7 @@ class NseTradingCalendar:
         return [d for d in raw if d not in self._supplemental]
 
     def is_market_open(self, dt: datetime) -> bool:
-        """Return True if *dt* falls within normal NSE market hours (9:15–15:30 IST).
+        """Return True if *dt* falls within normal NSE market hours (9:15-15:30 IST).
 
         Args:
             dt: An IST-aware (or any-tz-aware) datetime. Naive datetimes are rejected.

@@ -1,5 +1,6 @@
 # tests/data/test_types.py
 from __future__ import annotations
+
 from dataclasses import FrozenInstanceError
 from datetime import datetime
 from decimal import Decimal
@@ -7,7 +8,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from agent.data.types import Bar, DataQuality, Order, OrderAck, Position, Discrepancy
+from agent.data.types import Bar, DataQuality, Order
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -71,13 +72,15 @@ def test_order_is_frozen():
 def test_settings_live_trading_disabled_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("LIVE_TRADING_ENABLED", raising=False)
     from config.settings import AppSettings
+
     settings = AppSettings()
     assert settings.live_trading_enabled is False
 
 
 def test_bar_rejects_utc_timestamp() -> None:
     import datetime as _dt
-    utc_ts = _dt.datetime(2024, 1, 2, 3, 45, tzinfo=_dt.timezone.utc)  # 9:15 IST = 3:45 UTC
+
+    utc_ts = _dt.datetime(2024, 1, 2, 3, 45, tzinfo=_dt.UTC)  # 9:15 IST = 3:45 UTC
     with pytest.raises(ValueError, match="IST"):
         Bar(
             symbol="HDFCBANK",

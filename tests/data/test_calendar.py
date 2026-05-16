@@ -37,9 +37,9 @@ def test_nse_holiday_is_not_trading_day(cal: NseTradingCalendar) -> None:
 def test_trading_sessions_returns_only_trading_days(cal: NseTradingCalendar) -> None:
     sessions = cal.trading_sessions(date(2024, 1, 1), date(2024, 1, 12))
     # Jan 1 (holiday), Jan 6-7 (weekend), Jan 8 (Monday, open)
-    assert date(2024, 1, 1) not in sessions   # New Year
-    assert date(2024, 1, 6) not in sessions   # Saturday
-    assert date(2024, 1, 2) in sessions       # Tuesday
+    assert date(2024, 1, 1) not in sessions  # New Year
+    assert date(2024, 1, 6) not in sessions  # Saturday
+    assert date(2024, 1, 2) in sessions  # Tuesday
     assert all(cal.is_trading_day(d) for d in sessions)
 
 

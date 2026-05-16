@@ -239,11 +239,7 @@ def test_handle_tick_skips_unknown_instrument_key(adapter: UpstoxAdapter) -> Non
     received: list[pl.DataFrame] = []
 
     fake_msg = {
-        "feeds": {
-            "NSE_EQ|UNKNOWN_ISIN_XYZ": {
-                "ltpc": {"ltp": 100.0, "ltt": "1704168600000"}
-            }
-        }
+        "feeds": {"NSE_EQ|UNKNOWN_ISIN_XYZ": {"ltpc": {"ltp": 100.0, "ltt": "1704168600000"}}}
     }
 
     adapter._handle_tick(fake_msg, callback=received.append)
@@ -254,22 +250,16 @@ def test_handle_tick_skips_feed_without_ltpc(adapter: UpstoxAdapter) -> None:
     """_handle_tick must skip a feed entry that has no 'ltpc' key."""
     received: list[pl.DataFrame] = []
 
-    fake_msg = {
-        "feeds": {
-            "NSE_EQ|INE040A01034": {
-                "someOtherData": {}  # no 'ltpc' key
-            }
-        }
-    }
+    fake_msg = {"feeds": {"NSE_EQ|INE040A01034": {"someOtherData": {}}}}  # no 'ltpc' key
 
     adapter._handle_tick(fake_msg, callback=received.append)
     assert len(received) == 0
 
 
-def test_stream_live_raises_not_implemented_when_streamer_unavailable(adapter: UpstoxAdapter) -> None:
-    """stream_live should raise if upstox_client is not importable (simulated by patching connect)."""
+def test_stream_live_calls_connect_once(adapter: UpstoxAdapter) -> None:
+    """stream_live must call streamer.connect() exactly once when connected."""
     import asyncio
-    from unittest.mock import patch, MagicMock
+    from unittest.mock import MagicMock, patch
 
     with patch("agent.data.upstox_adapter.MarketDataStreamerV3") as MockStreamer:
         instance = MockStreamer.return_value

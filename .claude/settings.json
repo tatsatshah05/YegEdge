@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git -C /Users/tatsatshah/Desktop/yegedge add agent/__init__.py agent/data/__init__.py agent/data/types.py config/__init__.py config/settings.py tests/__init__.py tests/data/__init__.py tests/conftest.py tests/data/test_types.py requirements.txt)"
+    ]
+  }
+}
