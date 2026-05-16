@@ -357,7 +357,7 @@ class UpstoxAdapter(BrokerAdapter):
 
         # streamer.connect() is synchronous and blocks until disconnected.
         # Wrap in run_in_executor so it doesn't block the asyncio event loop.
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         await loop.run_in_executor(None, streamer.connect)
 
         logger.info("upstox_adapter.stream_live.disconnected", symbols=symbols)
@@ -376,8 +376,8 @@ class UpstoxAdapter(BrokerAdapter):
         Errors in individual feed entries are caught and logged so a single
         bad tick never crashes the stream.
         """
-        try:
-            for instrument_key, feed_data in msg.get("feeds", {}).items():
+        for instrument_key, feed_data in msg.get("feeds", {}).items():
+            try:
                 try:
                     symbol = self._instrument_key_to_symbol(instrument_key)
                 except KeyError:
@@ -387,23 +387,23 @@ class UpstoxAdapter(BrokerAdapter):
                     )
                     continue
 
-                try:
-                    ltp_data = feed_data["ltpc"]
-                except KeyError:
+                ltp_data = feed_data.get("ltpc")
+                if ltp_data is None:
                     logger.debug(
                         "upstox_adapter.handle_tick.no_ltpc",
-                        symbol=symbol,
                         instrument_key=instrument_key,
                     )
                     continue
 
-                if "ltt" not in ltp_data:
+                if "ltt" not in ltp_data or "ltp" not in ltp_data:
                     logger.debug(
-                        "upstox_adapter.handle_tick.no_ltt",
+                        "upstox_adapter.handle_tick.incomplete_ltpc",
                         symbol=symbol,
+                        keys=list(ltp_data.keys()),
                     )
                     continue
 
+                # ltt is epoch ms as a string (e.g. "1704168600000")
                 ltp = float(ltp_data["ltp"])
                 ts = datetime.fromtimestamp(int(ltp_data["ltt"]) / 1000, tz=IST)
 
@@ -416,12 +416,12 @@ class UpstoxAdapter(BrokerAdapter):
                 )
                 callback(row_df)
 
-        except Exception as exc:
-            logger.error(
-                "upstox_adapter.handle_tick.error",
-                error=str(exc),
-                msg_keys=list(msg.keys()) if isinstance(msg, dict) else None,
-            )
+            except Exception as exc:
+                logger.error(
+                    "upstox_adapter.handle_tick.error",
+                    instrument_key=instrument_key,
+                    error=str(exc),
+                )
 
     def place_order(self, order: Order) -> OrderAck:
         """Order placement — implemented in Phase 5."""
