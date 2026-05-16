@@ -66,3 +66,93 @@ def add_rsi(df: pl.DataFrame, period: int = 14, column: str = "close") -> pl.Dat
         )
         .drop(["_avg_gain", "_avg_loss"])
     )
+
+
+def add_atr(df: pl.DataFrame, period: int = 14) -> pl.DataFrame:
+    """Add Average True Range column ``atr_{period}`` to *df*.
+
+    True Range = max(high - low, |high - prev_close|, |low - prev_close|).
+    Smoothed with Wilder's EWM (``com = period - 1``).  The first bar's TR is
+    ``high - low`` (no prev_close available; Polars' max_horizontal ignores nulls).
+
+    Parameters
+    ----------
+    df:     DataFrame with ``high``, ``low``, ``close`` columns.
+    period: ATR lookback period (default 14).
+    """
+    if period < 1:
+        raise ValueError(f"ATR period must be >= 1, got {period}")
+    prev_close = pl.col("close").shift(1)
+    tr = pl.max_horizontal(
+        pl.col("high") - pl.col("low"),
+        (pl.col("high") - prev_close).abs(),
+        (pl.col("low") - prev_close).abs(),
+    )
+    return df.with_columns(tr.ewm_mean(com=period - 1, adjust=False).alias(f"atr_{period}"))
+
+
+def add_adx(df: pl.DataFrame, period: int = 14) -> pl.DataFrame:
+    """Add ADX, +DI, and -DI columns to *df*.
+
+    Columns added: ``adx_{period}``, ``plus_di_{period}``, ``minus_di_{period}``.
+
+    Computation uses Wilder's smoothing (``com = period - 1``) throughout.
+    Division-by-zero in DX is guarded: when (+DI + -DI) == 0, DX = 0.
+
+    Parameters
+    ----------
+    df:     DataFrame with ``high``, ``low``, ``close`` columns.
+    period: ADX lookback period (default 14).
+    """
+    if period < 2:
+        raise ValueError(f"ADX period must be >= 2, got {period}")
+
+    # Unique temp column names to avoid collisions with any existing columns
+    _tr = f"_adx_tr{period}"
+    _pdm = f"_adx_pdm{period}"
+    _mdm = f"_adx_mdm{period}"
+    _dx = f"_adx_dx{period}"
+
+    prev_high = pl.col("high").shift(1)
+    prev_low = pl.col("low").shift(1)
+    prev_close = pl.col("close").shift(1)
+
+    tr = pl.max_horizontal(
+        pl.col("high") - pl.col("low"),
+        (pl.col("high") - prev_close).abs(),
+        (pl.col("low") - prev_close).abs(),
+    )
+    up_move = pl.col("high") - prev_high
+    down_move = prev_low - pl.col("low")
+    plus_dm = pl.when((up_move > down_move) & (up_move > 0)).then(up_move).otherwise(pl.lit(0.0))
+    minus_dm = (
+        pl.when((down_move > up_move) & (down_move > 0)).then(down_move).otherwise(pl.lit(0.0))
+    )
+
+    return (
+        df.with_columns(
+            [
+                tr.ewm_mean(com=period - 1, adjust=False).alias(_tr),
+                plus_dm.ewm_mean(com=period - 1, adjust=False).alias(_pdm),
+                minus_dm.ewm_mean(com=period - 1, adjust=False).alias(_mdm),
+            ]
+        )
+        .with_columns(
+            [
+                (100.0 * pl.col(_pdm) / pl.col(_tr)).alias(f"plus_di_{period}"),
+                (100.0 * pl.col(_mdm) / pl.col(_tr)).alias(f"minus_di_{period}"),
+            ]
+        )
+        .with_columns(
+            pl.when((pl.col(f"plus_di_{period}") + pl.col(f"minus_di_{period}")) == 0.0)
+            .then(pl.lit(0.0))
+            .otherwise(
+                100.0
+                * (pl.col(f"plus_di_{period}") - pl.col(f"minus_di_{period}")).abs()
+                / (pl.col(f"plus_di_{period}") + pl.col(f"minus_di_{period}"))
+            )
+            .alias(_dx)
+        )
+        .with_columns(pl.col(_dx).ewm_mean(com=period - 1, adjust=False).alias(f"adx_{period}"))
+        .drop([_tr, _pdm, _mdm, _dx])
+    )

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from agent.features.indicators import add_ema, add_rsi
+from agent.features.indicators import add_adx, add_atr, add_ema, add_rsi
 from tests.features.conftest import make_ohlcv_df
 
 # ---------------------------------------------------------------------------
@@ -135,3 +135,138 @@ def test_add_rsi_invalid_period_raises() -> None:
     df = make_ohlcv_df([100.0] * 10)
     with pytest.raises(ValueError, match="period"):
         add_rsi(df, period=1)
+
+
+# ---------------------------------------------------------------------------
+# ATR tests
+# ---------------------------------------------------------------------------
+
+
+def test_add_atr_returns_column_named_atr_period() -> None:
+    df = make_ohlcv_df([1000.0 + i for i in range(30)])
+    result = add_atr(df, period=14)
+    assert "atr_14" in result.columns
+
+
+def test_add_atr_is_non_negative() -> None:
+    """ATR must be >= 0 for all non-null values."""
+    closes = [1000.0 + i * 3 for i in range(50)]
+    df = make_ohlcv_df(closes)
+    result = add_atr(df, period=14)
+    values = result["atr_14"].drop_nulls().to_list()
+    assert all(v >= 0.0 for v in values), "ATR must be non-negative"
+
+
+def test_add_atr_constant_series_is_near_zero_after_warmup() -> None:
+    """On a perfectly flat series (no gaps, constant OHLCV), ATR should approach zero."""
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
+
+    IST = ZoneInfo("Asia/Kolkata")
+    n = 60
+    timestamps = [
+        datetime(2024, 1, 2, 9, 15, tzinfo=IST) + timedelta(minutes=60 * i) for i in range(n)
+    ]
+    import polars as pl
+
+    df = pl.DataFrame(
+        {
+            "symbol": ["TEST"] * n,
+            "timeframe": ["60m"] * n,
+            "timestamp": pl.Series(timestamps, dtype=pl.Datetime("us", "Asia/Kolkata")),
+            "open": pl.Series([1500.0] * n, dtype=pl.Float64),
+            "high": pl.Series([1500.0] * n, dtype=pl.Float64),
+            "low": pl.Series([1500.0] * n, dtype=pl.Float64),
+            "close": pl.Series([1500.0] * n, dtype=pl.Float64),
+            "volume": pl.Series([100_000] * n, dtype=pl.Int64),
+            "value": pl.Series([150_000_000.0] * n, dtype=pl.Float64),
+        }
+    )
+    result = add_atr(df, period=14)
+    tail = result["atr_14"].tail(20).drop_nulls().to_list()
+    assert all(v < 0.001 for v in tail), f"Flat series ATR should be ~0: {tail}"
+
+
+def test_add_atr_high_volatility_is_positive() -> None:
+    """On a series with significant high-low range, ATR should be clearly positive."""
+    import math
+
+    closes = [1500.0 + 50 * math.sin(i * 0.5) for i in range(60)]
+    df = make_ohlcv_df(closes)
+    result = add_atr(df, period=14)
+    tail = result["atr_14"].tail(20).drop_nulls().to_list()
+    assert all(v > 5.0 for v in tail), f"Volatile series ATR should be > 5: {tail}"
+
+
+def test_add_atr_preserves_original_columns() -> None:
+    df = make_ohlcv_df([1000.0 + i for i in range(30)])
+    result = add_atr(df, period=14)
+    for col in df.columns:
+        assert col in result.columns
+
+
+def test_add_atr_invalid_period_raises() -> None:
+    df = make_ohlcv_df([1000.0] * 10)
+    with pytest.raises(ValueError, match="period"):
+        add_atr(df, period=0)
+
+
+# ---------------------------------------------------------------------------
+# ADX tests
+# ---------------------------------------------------------------------------
+
+
+def test_add_adx_returns_expected_columns() -> None:
+    df = make_ohlcv_df([1000.0 + i * 5 for i in range(60)])
+    result = add_adx(df, period=14)
+    assert "adx_14" in result.columns
+    assert "plus_di_14" in result.columns
+    assert "minus_di_14" in result.columns
+
+
+def test_add_adx_values_in_zero_to_hundred() -> None:
+    """ADX, +DI, -DI must all be in [0, 100] for non-null values."""
+    closes = [1000.0 + i * 3 for i in range(80)]
+    df = make_ohlcv_df(closes)
+    result = add_adx(df, period=14)
+    for col in ("adx_14", "plus_di_14", "minus_di_14"):
+        values = result[col].drop_nulls().to_list()
+        assert all(0.0 <= v <= 100.0 for v in values), f"{col} out of [0,100]"
+
+
+def test_add_adx_uptrend_plus_di_dominates() -> None:
+    """Strong uptrend → +DI should be > -DI after warmup."""
+    closes = [1000.0 + i * 15 for i in range(80)]
+    df = make_ohlcv_df(closes)
+    result = add_adx(df, period=14)
+    tail = result.tail(30)
+    plus = tail["plus_di_14"].drop_nulls().to_list()
+    minus = tail["minus_di_14"].drop_nulls().to_list()
+    assert all(p > m for p, m in zip(plus, minus, strict=False)), "+DI should exceed -DI in uptrend"
+
+
+def test_add_adx_downtrend_minus_di_dominates() -> None:
+    """Strong downtrend → -DI should be > +DI after warmup."""
+    closes = [2000.0 - i * 15 for i in range(80)]
+    df = make_ohlcv_df(closes)
+    result = add_adx(df, period=14)
+    tail = result.tail(30)
+    plus = tail["plus_di_14"].drop_nulls().to_list()
+    minus = tail["minus_di_14"].drop_nulls().to_list()
+    assert all(
+        m > p for p, m in zip(plus, minus, strict=False)
+    ), "-DI should exceed +DI in downtrend"
+
+
+def test_add_adx_no_temp_columns_leaked() -> None:
+    """No columns starting with '_' should appear in the result."""
+    df = make_ohlcv_df([1000.0 + i * 5 for i in range(60)])
+    result = add_adx(df, period=14)
+    leaked = [c for c in result.columns if c.startswith("_")]
+    assert leaked == [], f"Leaked temp columns: {leaked}"
+
+
+def test_add_adx_invalid_period_raises() -> None:
+    df = make_ohlcv_df([1000.0] * 10)
+    with pytest.raises(ValueError, match="period"):
+        add_adx(df, period=1)
