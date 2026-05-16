@@ -62,3 +62,52 @@ def test_market_closed_after_1530(cal: NseTradingCalendar) -> None:
 def test_market_closed_on_weekend(cal: NseTradingCalendar) -> None:
     dt = datetime(2024, 1, 6, 10, 0, tzinfo=IST)
     assert cal.is_market_open(dt) is False
+
+
+def test_is_market_open_raises_on_naive_datetime(cal: NseTradingCalendar) -> None:
+    import datetime as _dt
+
+    naive_dt = _dt.datetime(2024, 1, 2, 10, 0)  # no tzinfo
+    with pytest.raises(ValueError):
+        cal.is_market_open(naive_dt)
+
+
+def test_market_open_at_exact_open_boundary(cal: NseTradingCalendar) -> None:
+    # Exactly at 9:15:00 — market is open
+    dt = datetime(2024, 1, 2, 9, 15, 0, tzinfo=IST)
+    assert cal.is_market_open(dt) is True
+
+
+def test_market_closed_one_second_before_open(cal: NseTradingCalendar) -> None:
+    # 9:14:59 — market is not open
+    dt = datetime(2024, 1, 2, 9, 14, 59, tzinfo=IST)
+    assert cal.is_market_open(dt) is False
+
+
+def test_market_open_at_exact_close_boundary(cal: NseTradingCalendar) -> None:
+    # Exactly at 15:30:00 — still open
+    dt = datetime(2024, 1, 2, 15, 30, 0, tzinfo=IST)
+    assert cal.is_market_open(dt) is True
+
+
+def test_market_closed_at_1531(cal: NseTradingCalendar) -> None:
+    # 15:31:00 — market is closed
+    dt = datetime(2024, 1, 2, 15, 31, 0, tzinfo=IST)
+    assert cal.is_market_open(dt) is False
+
+
+def test_next_open_same_day_before_market(cal: NseTradingCalendar) -> None:
+    # On a trading day before 9:15 — next open is 9:15 today
+    dt = datetime(2024, 1, 2, 8, 0, tzinfo=IST)
+    result = cal.next_open(dt)
+    assert result == datetime(2024, 1, 2, 9, 15, tzinfo=IST)
+
+
+def test_next_open_after_market_close_returns_next_trading_day(
+    cal: NseTradingCalendar,
+) -> None:
+    # After close on a Friday — next open should be Monday
+    dt = datetime(2024, 1, 5, 16, 0, tzinfo=IST)  # Friday after close
+    result = cal.next_open(dt)
+    # Next trading day is Monday Jan 8 2024
+    assert result == datetime(2024, 1, 8, 9, 15, tzinfo=IST)

@@ -5,32 +5,21 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import exchange_calendars as xcals
+import structlog
 import yaml
 
 IST = ZoneInfo("Asia/Kolkata")
-_MARKET_OPEN = time(9, 15)
-_MARKET_CLOSE = time(15, 30)
+# Lower bound: 9:15:00 inclusive (second-precision)
+_MARKET_OPEN = time(9, 15, 0)
+# Upper bound: 15:30:59 inclusive — treats the entire 15:30 minute as open,
+# but 15:31:00 and beyond are closed. This means 15:30:00 → True and
+# 15:31:00 → False, matching NSE's session-end convention.
+_MARKET_CLOSE = time(15, 30, 59)
 
 _CONFIG_DIR = Path(__file__).parents[2] / "config"
 _NSE_HOLIDAYS_FILE = _CONFIG_DIR / "nse_holidays.yaml"
 
-
-def _load_supplemental_holidays() -> frozenset[date]:
-    """Load NSE-specific holidays from config/nse_holidays.yaml.
-
-    These supplement the XBOM base calendar with dates that exchange-calendars
-    does not capture (e.g. special closures announced by NSE during the year).
-    """
-    if not _NSE_HOLIDAYS_FILE.exists():
-        return frozenset()
-    with _NSE_HOLIDAYS_FILE.open() as fh:
-        data: dict[int, list[str]] = yaml.safe_load(fh) or {}
-    holidays: set[date] = set()
-    for year_dates in data.values():
-        if year_dates:
-            for ds in year_dates:
-                holidays.add(date.fromisoformat(ds))
-    return frozenset(holidays)
+_log = structlog.get_logger()
 
 
 class NseTradingCalendar:
@@ -41,9 +30,41 @@ class NseTradingCalendar:
     declared in ``config/nse_holidays.yaml``.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, holidays_file: Path = _NSE_HOLIDAYS_FILE) -> None:
         self._cal = xcals.get_calendar("XBOM")
-        self._supplemental: frozenset[date] = _load_supplemental_holidays()
+        self._supplemental: frozenset[date] = self._load_supplemental_holidays(holidays_file)
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _load_supplemental_holidays(yaml_path: Path) -> frozenset[date]:
+        """Load NSE-specific holidays from a YAML file.
+
+        These supplement the XBOM base calendar with dates that exchange-calendars
+        does not capture (e.g. special closures announced by NSE during the year).
+        Malformed entries are skipped with a warning rather than raising.
+        """
+        if not yaml_path.exists():
+            return frozenset()
+        with yaml_path.open() as fh:
+            data = yaml.safe_load(fh) or {}
+        if not isinstance(data, dict):
+            _log.warning("calendar.holidays.invalid_yaml", path=str(yaml_path))
+            return frozenset()
+        holidays: set[date] = set()
+        for _year, dates in data.items():
+            if not isinstance(dates, list):
+                continue
+            for ds in dates:
+                if not isinstance(ds, str):
+                    continue
+                try:
+                    holidays.add(date.fromisoformat(ds))
+                except ValueError:
+                    _log.warning("calendar.holidays.invalid_date", date_str=ds)
+        return frozenset(holidays)
 
     # ------------------------------------------------------------------
     # Public API
@@ -74,7 +95,11 @@ class NseTradingCalendar:
         ist_dt = dt.astimezone(IST)
         if not self.is_trading_day(ist_dt.date()):
             return False
-        t = ist_dt.time().replace(second=0, microsecond=0)
+        # Compare at second precision (microseconds stripped only).
+        # _MARKET_OPEN  = 09:15:00 (inclusive lower bound)
+        # _MARKET_CLOSE = 15:30:59 (inclusive upper bound — full 15:30 minute is open)
+        # This means 15:30:00 → True, 15:31:00 → False.
+        t = ist_dt.time().replace(microsecond=0)
         return _MARKET_OPEN <= t <= _MARKET_CLOSE
 
     def next_open(self, dt: datetime) -> datetime:
