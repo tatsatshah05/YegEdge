@@ -78,12 +78,12 @@ class RegimeDetector:
     def predict(self, df: pl.DataFrame) -> pl.DataFrame:
         """Add a ``regime`` column to *df*.
 
-        Returns ``UNKNOWN`` for every row when the detector has not been fit.
-        Null-feature rows are filled with zeros before prediction (they will be
-        assigned to the nearest centroid; the strategy layer should discard
-        early-bar rows that have null indicators anyway).
+        Returns ``UNKNOWN`` for every row when the detector has not been fit or
+        when *df* is empty.  Null-feature rows are filled with zeros before
+        prediction (the strategy layer should discard early-bar rows with null
+        indicators anyway).  Overwrites any existing ``regime`` column.
         """
-        if self._model is None:
+        if self._model is None or len(df) == 0:
             return df.with_columns(pl.lit(Regime.UNKNOWN.value).alias("regime"))
         x = self._build_features(df)
         clusters = self._model.predict(x)
@@ -95,12 +95,32 @@ class RegimeDetector:
     # ------------------------------------------------------------------
 
     def _build_features(self, df: pl.DataFrame) -> np.ndarray:
-        """Return a (n_rows, 3) float64 array: [adx, atr_pct, momentum_20]."""
-        adx = df["adx_14"].fill_null(0.0).to_numpy().astype(np.float64)
-        atr_pct = (df["atr_14"] / df["close"] * 100.0).fill_null(0.0).to_numpy().astype(np.float64)
-        momentum = (df["close"] / df["close"].shift(20) - 1.0).fill_null(0.0).to_numpy().astype(
-            np.float64
+        """Return a (n_rows, 3) float64 array: [adx, atr_pct, momentum_20].
+
+        NaN guard: fill_nan().fill_null() covers both Polars NaN and null so
+        sklearn never receives NaN/inf from zero-close or zero-prior-close rows.
+        """
+        adx = (
+            df["adx_14"].fill_nan(0.0).fill_null(0.0).to_numpy().astype(np.float64)
+        )
+        atr_pct = (
+            (df["atr_14"] / df["close"] * 100.0)
+            .fill_nan(0.0)
+            .fill_null(0.0)
+            .to_numpy()
+            .astype(np.float64)
+        )
+        momentum = (
+            (df["close"] / df["close"].shift(20) - 1.0)
+            .fill_nan(0.0)
+            .fill_null(0.0)
+            .to_numpy()
+            .astype(np.float64)
         ) * 100.0
+        # Clip inf produced by division by zero (e.g. zero prior-close)
+        adx = np.clip(adx, -1e9, 1e9)
+        atr_pct = np.clip(atr_pct, -1e9, 1e9)
+        momentum = np.clip(momentum, -1e9, 1e9)
         return np.column_stack([adx, atr_pct, momentum])
 
     def _assign_labels(self, centers: np.ndarray) -> dict[int, Regime]:

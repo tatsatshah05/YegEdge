@@ -66,7 +66,8 @@ def test_fit_with_enough_data_marks_is_fit() -> None:
 def test_fit_with_insufficient_data_leaves_unfit() -> None:
     """fit() with fewer than 60 non-null rows must leave the detector unfit."""
     rd = RegimeDetector()
-    # Only 30 bars — after ADX warmup (~28 null rows), fewer than 60 non-null remain
+    # Only 30 bars total — all 30 are non-null after EWM smoothing (EWM produces no
+    # leading nulls), but 30 < _MIN_FIT_ROWS=60 so the detector stays unfit.
     df = _enriched([1000.0 + i for i in range(30)])
     rd.fit(df)
     assert rd.is_fit is False
@@ -126,3 +127,38 @@ def test_regime_column_dtype_is_string() -> None:
     rd.fit(df)
     result = rd.predict(df)
     assert result["regime"].dtype == pl.Utf8, f"Expected Utf8, got {result['regime'].dtype}"
+
+
+# ---------------------------------------------------------------------------
+# Edge cases: NaN safety and empty DataFrame
+# ---------------------------------------------------------------------------
+
+
+def test_predict_empty_dataframe_returns_unknown() -> None:
+    """predict() on an empty DataFrame must return an empty DataFrame with regime=UNKNOWN dtype."""
+    df = _enriched([1000.0 + i * 5 for i in range(100)])
+    rd = RegimeDetector()
+    rd.fit(df)
+    empty = df.clear()  # same schema, zero rows
+    result = rd.predict(empty)
+    assert len(result) == 0
+    assert "regime" in result.columns
+
+
+def test_fit_and_predict_tolerates_nan_in_features() -> None:
+    """NaN values in adx_14/atr_14 must not crash fit() or predict()."""
+    closes = [1000.0 + i * 5 for i in range(100)]
+    df = _enriched(closes)
+    # Inject NaN directly into the adx_14 column for a few rows
+    adx_with_nan = df["adx_14"].to_list()
+    adx_with_nan[0] = float("nan")
+    adx_with_nan[10] = float("nan")
+    df = df.with_columns(pl.Series("adx_14", adx_with_nan, dtype=pl.Float64))
+
+    rd = RegimeDetector()
+    rd.fit(df)   # must not raise
+    assert rd.is_fit is True
+    result = rd.predict(df)  # must not raise
+    valid_values = {r.value for r in Regime}
+    for v in result["regime"].to_list():
+        assert v in valid_values
