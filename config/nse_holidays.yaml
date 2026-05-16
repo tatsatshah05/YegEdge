@@ -1,0 +1,41 @@
+# NSE supplemental holidays not captured by the XBOM exchange-calendars base.
+# These are official NSE equity-segment holiday announcements.
+# Source: https://www.nseindia.com/resources/exchange-communication-holidays
+# Update annually before the new trading year begins.
+#
+# Format: YYYY-MM-DD — one date per line under the relevant year.
+# These dates are ADDED to (not replacing) the XBOM base calendar.
+
+2024:
+  - "2024-01-01"   # New Year's Day
+  - "2024-01-22"   # Ram Mandir Consecration (special holiday)
+
+2025:
+  - "2025-01-01"   # New Year's Day
+  - "2025-02-26"   # Maha Shivratri
+  - "2025-03-14"   # Holi
+  - "2025-04-10"   # Shri Ram Navami
+  - "2025-04-14"   # Dr. Ambedkar Jayanti
+  - "2025-04-18"   # Good Friday
+  - "2025-05-01"   # Maharashtra Day
+  - "2025-08-15"   # Independence Day
+  - "2025-08-27"   # Ganesh Chaturthi
+  - "2025-10-02"   # Gandhi Jayanti / Dussehra
+  - "2025-10-20"   # Diwali Amavasya (Lakshmi Puja)
+  - "2025-10-21"   # Diwali (Balipratipada)
+  - "2025-11-05"   # Gurunanak Jayanti
+  - "2025-12-25"   # Christmas
+
+2026:
+  - "2026-01-01"   # New Year's Day
+  - "2026-01-26"   # Republic Day
+  - "2026-03-03"   # Maha Shivratri
+  - "2026-04-02"   # Shri Ram Navami
+  - "2026-04-03"   # Good Friday
+  - "2026-04-14"   # Dr. Ambedkar Jayanti
+  - "2026-05-01"   # Maharashtra Day
+  - "2026-08-15"   # Independence Day
+  - "2026-10-02"   # Gandhi Jayanti
+  - "2026-11-14"   # Diwali (Lakshmi Puja)
+  - "2026-11-25"   # Gurunanak Jayanti
+  - "2026-12-25"   # Christmas
