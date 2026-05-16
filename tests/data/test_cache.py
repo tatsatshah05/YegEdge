@@ -83,6 +83,43 @@ def test_write_appends_across_years(cache_dir: Path) -> None:
     assert len(result) == 6
 
 
+def test_incremental_write_deduplicates_and_latest_wins(cache_dir: Path) -> None:
+    cache = ParquetCache(root=cache_dir)
+
+    # First write: 3 bars at Jan 1, 2, 3 with close=103
+    df_initial = _make_bars("HDFCBANK", "60m", 2024, n=3)
+    cache.write(df_initial, symbol="HDFCBANK", timeframe="60m")
+
+    # Second write: Jan 3 (overlap) with updated close=999, plus new Jan 4
+    overlap_ts = datetime(2024, 1, 3, 9, 15, tzinfo=IST)
+    new_ts = datetime(2024, 1, 4, 9, 15, tzinfo=IST)
+    df_update = pl.DataFrame(
+        {
+            "symbol": ["HDFCBANK", "HDFCBANK"],
+            "timeframe": ["60m", "60m"],
+            "timestamp": [overlap_ts, new_ts],
+            "open": [100.00, 100.00],
+            "high": [105.00, 105.00],
+            "low": [99.00, 99.00],
+            "close": [999.00, 103.00],  # 999 should win over original 103 on overlap
+            "volume": [50_000, 50_000],
+            "value": [5_000_000.0, 5_000_000.0],
+            "data_quality": ["ok", "ok"],
+        }
+    )
+    cache.write(df_update, symbol="HDFCBANK", timeframe="60m")
+
+    result = cache.read(
+        symbol="HDFCBANK",
+        timeframe="60m",
+        start=datetime(2024, 1, 1, tzinfo=IST),
+        end=datetime(2024, 12, 31, tzinfo=IST),
+    )
+    assert len(result) == 4  # Jan 1, 2, 3, 4 — no duplicate for Jan 3
+    jan3 = result.filter(pl.col("timestamp") == overlap_ts)
+    assert jan3["close"][0] == 999.00  # latest write wins
+
+
 def test_coverage_report_structure(cache_dir: Path) -> None:
     cache = ParquetCache(root=cache_dir)
     cache.write(_make_bars("SBIN", "60m", 2024), symbol="SBIN", timeframe="60m")
@@ -91,3 +128,14 @@ def test_coverage_report_structure(cache_dir: Path) -> None:
     assert "60m" in report["SBIN"]
     start, end = report["SBIN"]["60m"]
     assert start <= end
+
+
+def test_coverage_report_aggregates_across_years(cache_dir: Path) -> None:
+    cache = ParquetCache(root=cache_dir)
+    cache.write(_make_bars("KOTAKBANK", "60m", 2023, n=3), symbol="KOTAKBANK", timeframe="60m")
+    cache.write(_make_bars("KOTAKBANK", "60m", 2024, n=3), symbol="KOTAKBANK", timeframe="60m")
+    report = cache.coverage_report()
+    start, end = report["KOTAKBANK"]["60m"]
+    # min must be in 2023, max must be in 2024 — not both from the same year
+    assert start.year == 2023
+    assert end.year == 2024

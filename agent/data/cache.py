@@ -34,6 +34,8 @@ class ParquetCache:
         If a year file already exists, the new bars are merged with the existing data:
         duplicates (matched on symbol, timeframe, timestamp) are resolved by keeping
         the last-seen row, and the result is sorted by timestamp before writing.
+        Writes are atomic: data is written to a temp file then renamed to prevent
+        corrupt Parquet files on crash.
         """
         with_year = df.with_columns(pl.col("timestamp").dt.year().alias("_year"))
         for year_val in with_year["_year"].unique().sort().to_list():
@@ -52,9 +54,13 @@ class ParquetCache:
                     )
                     .sort("timestamp")
                 )
-                merged.write_parquet(path)
+                tmp = path.with_suffix(".tmp.parquet")
+                merged.write_parquet(tmp)
+                tmp.replace(path)
             else:
-                year_df.sort("timestamp").write_parquet(path)
+                tmp = path.with_suffix(".tmp.parquet")
+                year_df.sort("timestamp").write_parquet(tmp)
+                tmp.replace(path)
 
         log.info("cache.write", symbol=symbol, timeframe=timeframe, rows=len(df))
 
@@ -124,18 +130,21 @@ class ParquetCache:
     def coverage_report(self) -> dict[str, dict[str, tuple[datetime, datetime]]]:
         """Return {symbol: {timeframe: (min_ts, max_ts)}} for all cached data.
 
+        Aggregates min/max across all year files for each (symbol, timeframe) pair.
         Useful for identifying gaps before requesting incremental history from the
         broker. Returns an empty dict when the cache root does not exist yet.
         """
-        report: dict[str, dict[str, tuple[datetime, datetime]]] = {}
-        if not self._root.exists():
-            return report
+        # Accumulate per-(symbol, timeframe): running min and max across all years
+        acc: dict[tuple[str, str], tuple[datetime, datetime]] = {}
 
-        for tf_dir in self._root.iterdir():
+        if not self._root.exists():
+            return {}
+
+        for tf_dir in sorted(self._root.iterdir(), key=lambda p: p.name):
             if not tf_dir.is_dir():
                 continue
             timeframe = tf_dir.name
-            for year_dir in tf_dir.iterdir():
+            for year_dir in sorted(tf_dir.iterdir(), key=lambda p: p.name):
                 if not year_dir.is_dir():
                     continue
                 for parquet_file in year_dir.glob("*.parquet"):
@@ -149,8 +158,16 @@ class ParquetCache:
                         continue
                     mn = mn_raw if mn_raw.tzinfo else mn_raw.replace(tzinfo=_IST)
                     mx = mx_raw if mx_raw.tzinfo else mx_raw.replace(tzinfo=_IST)
-                    report.setdefault(symbol, {})[timeframe] = (mn, mx)
+                    key = (symbol, timeframe)
+                    if key not in acc:
+                        acc[key] = (mn, mx)
+                    else:
+                        prev_mn, prev_mx = acc[key]
+                        acc[key] = (min(prev_mn, mn), max(prev_mx, mx))
 
+        report: dict[str, dict[str, tuple[datetime, datetime]]] = {}
+        for (symbol, timeframe), (mn, mx) in acc.items():
+            report.setdefault(symbol, {})[timeframe] = (mn, mx)
         return report
 
     # ------------------------------------------------------------------
