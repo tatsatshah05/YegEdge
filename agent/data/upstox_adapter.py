@@ -5,6 +5,8 @@ import json
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
+from typing import Final
+from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 import polars as pl
@@ -14,14 +16,14 @@ import structlog
 from agent.data.broker_adapter import BrokerAdapter
 from agent.data.types import Discrepancy, Order, OrderAck, Position
 
-log = structlog.get_logger()
+logger = structlog.get_logger()
 
 IST = ZoneInfo("Asia/Kolkata")
 
 # ---------------------------------------------------------------------------
 # Public constant — maps our internal timeframe strings to Upstox v3 API params
 # ---------------------------------------------------------------------------
-UPSTOX_TIMEFRAME_MAP: dict[str, tuple[str, int]] = {
+UPSTOX_TIMEFRAME_MAP: Final[dict[str, tuple[str, int]]] = {
     "15m": ("minutes", 15),
     "60m": ("hours", 1),
     "1d": ("days", 1),
@@ -31,9 +33,20 @@ _INSTRUMENTS_CDN_URL = (
     "https://assets.upstox.com/market-quote/instruments/exchange/NSE.json.gz"
 )
 
-_HISTORICAL_URL_TEMPLATE = (
-    "https://api.upstox.com/v3/historical-candle"
-    "/{instrument_key}/{unit}/{interval}/{to_date}/{from_date}"
+_OHLCV_SCHEMA: Final[dict[str, type[pl.DataType]]] = {
+    "symbol": pl.Utf8,
+    "timeframe": pl.Utf8,
+    "timestamp": pl.Datetime("us", "Asia/Kolkata"),
+    "open": pl.Float64,
+    "high": pl.Float64,
+    "low": pl.Float64,
+    "close": pl.Float64,
+    "volume": pl.Int64,
+    "value": pl.Float64,
+}
+
+_REQUIRED_INSTRUMENT_COLUMNS: Final[frozenset[str]] = frozenset(
+    {"tradingsymbol", "exchange", "isin"}
 )
 
 
@@ -64,31 +77,61 @@ class UpstoxAdapter(BrokerAdapter):
 
         If *cache_path* is provided and the file exists, reads it from disk
         (JSON array).  Otherwise downloads the gzipped JSON from the Upstox
-        CDN, decompresses it, and returns the result.
+        CDN, decompresses it, and returns the result.  Raises `RuntimeError`
+        on any I/O or parse failure with a structured log entry.
         """
+        df: pl.DataFrame
         if cache_path is not None:
             p = Path(cache_path)
             if p.exists():
-                log.info(
-                    "upstox_adapter.instruments.cache_hit",
-                    path=str(p),
-                )
-                with p.open("r", encoding="utf-8") as fh:
-                    data = json.load(fh)
-                return pl.DataFrame(data)
+                logger.info("upstox_adapter.instruments.cache_hit", path=str(p))
+                try:
+                    with p.open("r", encoding="utf-8") as fh:
+                        data = json.load(fh)
+                    df = pl.DataFrame(data)
+                except Exception as exc:
+                    logger.error(
+                        "upstox_adapter.instruments.cache_read_error",
+                        path=str(p),
+                        error=str(exc),
+                    )
+                    raise RuntimeError(
+                        f"Failed to read instrument cache from {p}: {exc}"
+                    ) from exc
+                self._validate_instrument_columns(df)
+                return df
+            logger.info(
+                "upstox_adapter.instruments.cache_miss_falling_back_to_cdn",
+                path=str(p),
+            )
 
-        log.info(
-            "upstox_adapter.instruments.downloading",
-            url=_INSTRUMENTS_CDN_URL,
-        )
-        resp = requests.get(_INSTRUMENTS_CDN_URL, timeout=30)
-        resp.raise_for_status()
-        data = json.loads(gzip.decompress(resp.content))
-        log.info(
-            "upstox_adapter.instruments.loaded",
-            count=len(data),
-        )
-        return pl.DataFrame(data)
+        logger.info("upstox_adapter.instruments.downloading", url=_INSTRUMENTS_CDN_URL)
+        try:
+            resp = requests.get(_INSTRUMENTS_CDN_URL, timeout=30)
+            resp.raise_for_status()
+            data = json.loads(gzip.decompress(resp.content))
+        except Exception as exc:
+            logger.error(
+                "upstox_adapter.instruments.download_error",
+                url=_INSTRUMENTS_CDN_URL,
+                error=str(exc),
+            )
+            raise RuntimeError(
+                f"Failed to download instrument master from Upstox CDN: {exc}"
+            ) from exc
+        df = pl.DataFrame(data)
+        logger.info("upstox_adapter.instruments.loaded", count=len(df))
+        self._validate_instrument_columns(df)
+        return df
+
+    @staticmethod
+    def _validate_instrument_columns(df: pl.DataFrame) -> None:
+        missing = _REQUIRED_INSTRUMENT_COLUMNS - set(df.columns)
+        if missing:
+            raise RuntimeError(
+                f"Instrument master is missing required columns: {missing}. "
+                "The Upstox CDN data format may have changed — refresh the cache."
+            )
 
     def _symbol_to_instrument_key(self, symbol: str) -> str:
         """Return the Upstox instrument key for a given NSE trading symbol.
@@ -166,19 +209,17 @@ class UpstoxAdapter(BrokerAdapter):
 
         unit, interval = UPSTOX_TIMEFRAME_MAP[timeframe]
         instrument_key = self._symbol_to_instrument_key(symbol)
+        encoded_key = quote(instrument_key, safe="")  # encode the pipe character
 
         from_date = start.strftime("%Y-%m-%d")
         to_date = end.strftime("%Y-%m-%d")
 
-        url = _HISTORICAL_URL_TEMPLATE.format(
-            instrument_key=instrument_key,
-            unit=unit,
-            interval=interval,
-            to_date=to_date,
-            from_date=from_date,
+        url = (
+            f"https://api.upstox.com/v3/historical-candle"
+            f"/{encoded_key}/{unit}/{interval}/{to_date}/{from_date}"
         )
 
-        log.info(
+        logger.info(
             "upstox_adapter.fetch_historical.request",
             symbol=symbol,
             timeframe=timeframe,
@@ -197,12 +238,12 @@ class UpstoxAdapter(BrokerAdapter):
         candles: list[list] = payload.get("data", {}).get("candles", [])
 
         if not candles:
-            log.info(
+            logger.info(
                 "upstox_adapter.fetch_historical.empty",
                 symbol=symbol,
                 timeframe=timeframe,
             )
-            return pl.DataFrame()
+            return pl.DataFrame(schema=_OHLCV_SCHEMA)
 
         # Each candle: [ts_str, open, high, low, close, volume, value_or_oi]
         timestamps: list[datetime] = []
@@ -213,32 +254,54 @@ class UpstoxAdapter(BrokerAdapter):
         volumes: list[int] = []
         values: list[float] = []
 
-        for candle in candles:
-            ts_str, o, h, l, c, vol, val = candle
-            ts = datetime.fromisoformat(ts_str).astimezone(IST)
-            timestamps.append(ts)
+        for idx, candle in enumerate(candles):
+            if len(candle) < 7:
+                logger.warning(
+                    "upstox_adapter.fetch_historical.malformed_candle",
+                    symbol=symbol,
+                    index=idx,
+                    candle=candle,
+                )
+                continue
+            ts_str, o, h, l, c, vol, val = candle[0], candle[1], candle[2], candle[3], candle[4], candle[5], candle[6]
+            ts = datetime.fromisoformat(ts_str)
+            if ts.tzinfo is None:
+                logger.error(
+                    "upstox_adapter.fetch_historical.naive_timestamp",
+                    symbol=symbol,
+                    index=idx,
+                    ts_str=ts_str,
+                )
+                raise ValueError(
+                    f"Upstox returned a naive (no timezone) timestamp at candle {idx}: {ts_str!r}. "
+                    "Expected an ISO 8601 string with UTC offset."
+                )
+            timestamps.append(ts.astimezone(IST))
             opens.append(float(o))
             highs.append(float(h))
             lows.append(float(l))
             closes.append(float(c))
-            volumes.append(int(vol))
+            volumes.append(round(float(vol)))
             values.append(float(val))
+
+        if not timestamps:
+            return pl.DataFrame(schema=_OHLCV_SCHEMA)
 
         df = pl.DataFrame(
             {
-                "symbol": [symbol] * len(candles),
-                "timeframe": [timeframe] * len(candles),
-                "timestamp": pl.Series(timestamps).dt.convert_time_zone("Asia/Kolkata"),
-                "open": opens,
-                "high": highs,
-                "low": lows,
-                "close": closes,
-                "volume": volumes,
-                "value": values,
+                "symbol": pl.Series([symbol] * len(timestamps), dtype=pl.Utf8),
+                "timeframe": pl.Series([timeframe] * len(timestamps), dtype=pl.Utf8),
+                "timestamp": pl.Series(timestamps, dtype=pl.Datetime("us", "Asia/Kolkata")),
+                "open": pl.Series(opens, dtype=pl.Float64),
+                "high": pl.Series(highs, dtype=pl.Float64),
+                "low": pl.Series(lows, dtype=pl.Float64),
+                "close": pl.Series(closes, dtype=pl.Float64),
+                "volume": pl.Series(volumes, dtype=pl.Int64),
+                "value": pl.Series(values, dtype=pl.Float64),
             }
         ).sort("timestamp")
 
-        log.info(
+        logger.info(
             "upstox_adapter.fetch_historical.done",
             symbol=symbol,
             timeframe=timeframe,

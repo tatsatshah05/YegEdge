@@ -145,8 +145,10 @@ def test_fetch_historical_timestamps_are_ist(adapter: UpstoxAdapter) -> None:
 
 
 def test_fetch_historical_empty_candles_returns_empty_df(adapter: UpstoxAdapter) -> None:
-    """When the API returns an empty candles list, return an empty DataFrame."""
+    """When the API returns an empty candles list, return a schema-correct empty DataFrame."""
     from datetime import datetime
+
+    import polars as pl
 
     mock_resp = _make_mock_response(EMPTY_CANDLE_RESPONSE)
 
@@ -160,6 +162,39 @@ def test_fetch_historical_empty_candles_returns_empty_df(adapter: UpstoxAdapter)
 
     assert isinstance(df, pl.DataFrame)
     assert len(df) == 0
+    # Schema must be correct even on empty result so downstream code can introspect columns
+    assert "symbol" in df.columns
+    assert "timestamp" in df.columns
+    assert df["open"].dtype == pl.Float64
+
+
+def test_fetch_historical_skips_malformed_candles(adapter: UpstoxAdapter) -> None:
+    """Candles with fewer than 7 elements are skipped with a warning, not an exception."""
+    from datetime import datetime
+
+    response_with_bad_candle = {
+        "status": "success",
+        "data": {
+            "candles": [
+                ["2024-01-02T09:15:00+05:30", 1700.0, 1720.0, 1695.0, 1710.0, 100000, 171000000.0],
+                ["2024-01-02T10:15:00+05:30", 1710.0, 1725.0],  # truncated — only 3 elements
+            ]
+        },
+    }
+
+    mock_resp = _make_mock_response(response_with_bad_candle)
+
+    with patch("agent.data.upstox_adapter.requests.get", return_value=mock_resp):
+        df = adapter.fetch_historical(
+            symbol="HDFCBANK",
+            timeframe="60m",
+            start=datetime(2024, 1, 2, tzinfo=IST),
+            end=datetime(2024, 1, 2, tzinfo=IST),
+        )
+
+    # Only the valid candle should appear — malformed one is skipped
+    assert len(df) == 1
+    assert df["open"][0] == 1700.0
 
 
 def test_upstox_timeframe_map_covers_required_timeframes() -> None:
