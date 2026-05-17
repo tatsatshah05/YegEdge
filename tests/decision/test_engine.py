@@ -6,9 +6,9 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
+from agent.data.types import DataQuality, Position
 from agent.decision.engine import DecisionEngine
 from agent.decision.types import DecisionStatus, ResearchNote
-from agent.data.types import DataQuality, Position
 from agent.risk.types import PortfolioState
 from agent.strategies.types import Action, Signal
 
@@ -89,6 +89,7 @@ def _make_note(signal_id: str, veto: bool, reason: str | None = None) -> Researc
 
 # --- Basic ---
 
+
 def test_empty_signals_returns_empty() -> None:
     engine = DecisionEngine()
     result = engine.evaluate([], _empty_portfolio(), evaluation_time=EVAL_TIME)
@@ -122,12 +123,11 @@ def test_single_exit_long_becomes_pending() -> None:
 def test_evaluation_time_naive_raises() -> None:
     engine = DecisionEngine()
     with pytest.raises(ValueError, match="IST-aware"):
-        engine.evaluate(
-            [], _empty_portfolio(), evaluation_time=datetime(2024, 1, 2, 10, 0)
-        )
+        engine.evaluate([], _empty_portfolio(), evaluation_time=datetime(2024, 1, 2, 10, 0))
 
 
 # --- Deduplication ---
+
 
 def test_same_symbol_action_two_strategies_deduplicates() -> None:
     engine = DecisionEngine()
@@ -163,6 +163,7 @@ def test_enter_and_exit_same_symbol_are_separate_decisions() -> None:
 
 # --- Portfolio context ---
 
+
 def test_enter_long_skipped_when_already_holding() -> None:
     engine = DecisionEngine()
     sig = _make_signal(symbol="HDFCBANK", action=Action.ENTER_LONG)
@@ -192,6 +193,7 @@ def test_enter_long_not_skipped_when_holding_different_symbol() -> None:
 
 
 # --- Veto handling ---
+
 
 def test_veto_true_produces_wait_for_confirmation() -> None:
     engine = DecisionEngine()
@@ -249,6 +251,7 @@ def test_veto_with_no_reason_uses_fallback_message() -> None:
 
 # --- signal_id, merged_from, timestamp ---
 
+
 def test_signal_id_format() -> None:
     engine = DecisionEngine()
     sig = _make_signal(symbol="HDFCBANK", action=Action.ENTER_LONG)
@@ -277,3 +280,13 @@ def test_decision_timestamp_matches_evaluation_time() -> None:
     sig = _make_signal()
     result = engine.evaluate([sig], _empty_portfolio(), evaluation_time=EVAL_TIME)
     assert result[0].timestamp == EVAL_TIME
+
+
+def test_merged_from_multiple_strategies_sorted() -> None:
+    engine = DecisionEngine()
+    sig_z = _make_signal(confidence=0.7, strategy_name="zebra_strategy")
+    sig_a = _make_signal(confidence=0.8, strategy_name="alpha_strategy")
+    sig_m = _make_signal(confidence=0.9, strategy_name="middle_strategy")
+    result = engine.evaluate([sig_z, sig_a, sig_m], _empty_portfolio(), evaluation_time=EVAL_TIME)
+    assert len(result) == 1
+    assert result[0].merged_from == ("alpha_strategy", "middle_strategy", "zebra_strategy")
