@@ -6,8 +6,8 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from agent.decision.types import Decision, DecisionStatus, ResearchNote
 from agent.data.types import DataQuality
+from agent.decision.types import Decision, DecisionStatus, ResearchNote
 from agent.strategies.types import Action, Signal
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -73,7 +73,7 @@ def test_research_note_is_frozen() -> None:
         tokens_used=100,
         cached=False,
     )
-    with pytest.raises(Exception):
+    with pytest.raises(AttributeError):
         note.veto = True  # type: ignore[misc]
 
 
@@ -103,7 +103,7 @@ def test_decision_is_frozen() -> None:
         skip_reason="",
         timestamp=datetime(2024, 1, 2, 10, 0, tzinfo=IST),
     )
-    with pytest.raises(Exception):
+    with pytest.raises(AttributeError):
         d.status = DecisionStatus.SKIPPED  # type: ignore[misc]
 
 

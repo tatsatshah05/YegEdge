@@ -120,10 +120,6 @@ class DecisionEngine:
             decisions=len(decisions),
             pending=sum(1 for d in decisions if d.status == DecisionStatus.PENDING),
             skipped=sum(1 for d in decisions if d.status == DecisionStatus.SKIPPED),
-            vetoed=sum(
-                1
-                for d in decisions
-                if d.status == DecisionStatus.WAIT_FOR_CONFIRMATION
-            ),
+            vetoed=sum(1 for d in decisions if d.status == DecisionStatus.WAIT_FOR_CONFIRMATION),
         )
         return decisions
