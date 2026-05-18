@@ -31,8 +31,9 @@ def test_run_paper_exits_when_no_cache(tmp_path: Path) -> None:
 
 
 def test_runner_module_has_main() -> None:
-    from pathlib import Path
     import importlib.util
+    from pathlib import Path
+
     path = Path(__file__).parent.parent.parent / "agent" / "runner" / "__main__.py"
     spec = importlib.util.spec_from_file_location("agent.runner.__main__", path)
     assert spec is not None

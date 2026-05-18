@@ -15,10 +15,15 @@ IST = ZoneInfo("Asia/Kolkata")
 T0 = datetime(2024, 1, 2, 10, 0, tzinfo=IST)
 
 _STATE = PortfolioState(
-    nav=Decimal("100000"), cash=Decimal("100000"),
-    positions={}, daily_pnl=Decimal("0"),
-    weekly_pnl=Decimal("0"), peak_nav=Decimal("100000"),
-    orders_today=0, last_order_time={}, kill_switch_active=False,
+    nav=Decimal("100000"),
+    cash=Decimal("100000"),
+    positions={},
+    daily_pnl=Decimal("0"),
+    weekly_pnl=Decimal("0"),
+    peak_nav=Decimal("100000"),
+    orders_today=0,
+    last_order_time={},
+    kill_switch_active=False,
     evaluation_time=T0,
 )
 

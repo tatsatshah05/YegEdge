@@ -50,6 +50,7 @@ def test_portfolio_tracker_activate_kill_switch() -> None:
     from datetime import datetime
     from decimal import Decimal
     from zoneinfo import ZoneInfo
+
     from agent.portfolio.tracker import PortfolioTracker
 
     IST = ZoneInfo("Asia/Kolkata")

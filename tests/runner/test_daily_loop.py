@@ -46,22 +46,24 @@ def _make_enriched_df(n: int = 55, symbol: str = "HDFCBANK") -> pl.DataFrame:
     ema_21 = [c - 10.0 for c in closes]
     ema_50 = [c - 5.0 for c in closes[:-1]] + [closes[-1] - 11.0]  # cross at last bar
 
-    return pl.DataFrame({
-        "symbol": [symbol] * n,
-        "timestamp": timestamps,
-        "open": opens,
-        "high": highs,
-        "low": lows,
-        "close": closes,
-        "volume": [100_000 + i * 1000 for i in range(n)],
-        "value": [c * 100_000 for c in closes],
-        "ema_21": ema_21,
-        "ema_50": ema_50,
-        "adx_14": [25.0] * n,
-        "atr_14": [15.0] * n,
-        "data_quality": [DataQuality.OK.value] * n,
-        "regime": ["trending"] * n,
-    })
+    return pl.DataFrame(
+        {
+            "symbol": [symbol] * n,
+            "timestamp": timestamps,
+            "open": opens,
+            "high": highs,
+            "low": lows,
+            "close": closes,
+            "volume": [100_000 + i * 1000 for i in range(n)],
+            "value": [c * 100_000 for c in closes],
+            "ema_21": ema_21,
+            "ema_50": ema_50,
+            "adx_14": [25.0] * n,
+            "atr_14": [15.0] * n,
+            "data_quality": [DataQuality.OK.value] * n,
+            "regime": ["trending"] * n,
+        }
+    )
 
 
 def _make_risk_approved(signal: Signal) -> RiskDecision:
@@ -105,11 +107,18 @@ def _make_loop(tmp_path: Path, kill_switch: KillSwitch | None = None) -> DailyLo
     risk = MagicMock()
     risk.evaluate.return_value = _make_risk_rejected(
         Signal(
-            symbol="HDFCBANK", action=Action.ENTER_LONG, confidence=0.75,
-            suggested_stop=Decimal("1680"), suggested_target=Decimal("1750"),
-            invalidation_condition="", expected_r=2.0, time_horizon_hours=4,
-            regime_fit=0.9, data_quality=DataQuality.OK,
-            strategy_name="trend_following_v1", explanation="",
+            symbol="HDFCBANK",
+            action=Action.ENTER_LONG,
+            confidence=0.75,
+            suggested_stop=Decimal("1680"),
+            suggested_target=Decimal("1750"),
+            invalidation_condition="",
+            expected_r=2.0,
+            time_horizon_hours=4,
+            regime_fit=0.9,
+            data_quality=DataQuality.OK,
+            strategy_name="trend_following_v1",
+            explanation="",
             timestamp=T0,
         )
     )
@@ -171,19 +180,32 @@ def test_process_bar_returns_fills_when_approved(tmp_path: Path) -> None:
     df = _make_enriched_df()
 
     fake_signal = Signal(
-        symbol="HDFCBANK", action=Action.ENTER_LONG, confidence=0.75,
-        suggested_stop=Decimal("1680"), suggested_target=Decimal("1750"),
-        invalidation_condition="", expected_r=2.0, time_horizon_hours=4,
-        regime_fit=0.9, data_quality=DataQuality.OK,
-        strategy_name="trend_following_v1", explanation="", timestamp=T0,
+        symbol="HDFCBANK",
+        action=Action.ENTER_LONG,
+        confidence=0.75,
+        suggested_stop=Decimal("1680"),
+        suggested_target=Decimal("1750"),
+        invalidation_condition="",
+        expected_r=2.0,
+        time_horizon_hours=4,
+        regime_fit=0.9,
+        data_quality=DataQuality.OK,
+        strategy_name="trend_following_v1",
+        explanation="",
+        timestamp=T0,
     )
     loop._risk_manager.evaluate.return_value = _make_risk_approved(fake_signal)
 
     fake_fill = Fill(
-        order_id="paper-test", symbol="HDFCBANK", action=Action.ENTER_LONG,
-        quantity=10, fill_price=Decimal("1750"),
-        timestamp=T0, signal_id="test:enter_long:2024",
-        strategy_name="trend_following_v1", execution_mode=ExecutionMode.PAPER,
+        order_id="paper-test",
+        symbol="HDFCBANK",
+        action=Action.ENTER_LONG,
+        quantity=10,
+        fill_price=Decimal("1750"),
+        timestamp=T0,
+        signal_id="test:enter_long:2024",
+        strategy_name="trend_following_v1",
+        execution_mode=ExecutionMode.PAPER,
     )
     loop._executor.submit.return_value = fake_fill
 

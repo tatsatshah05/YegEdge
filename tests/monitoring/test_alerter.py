@@ -49,8 +49,11 @@ def test_send_fill_alert_includes_symbol_and_price() -> None:
     from agent.strategies.types import Action
 
     fill = Fill(
-        order_id="paper-test", symbol="HDFCBANK", action=Action.ENTER_LONG,
-        quantity=10, fill_price=Decimal("1710.00"),
+        order_id="paper-test",
+        symbol="HDFCBANK",
+        action=Action.ENTER_LONG,
+        quantity=10,
+        fill_price=Decimal("1710.00"),
         timestamp=datetime(2024, 1, 2, 9, 15, tzinfo=IST),
         signal_id="HDFCBANK:enter_long:2024-01-02T09:15:00+05:30",
         strategy_name="trend_following_v1",
@@ -69,10 +72,15 @@ def test_send_daily_summary_includes_nav() -> None:
     from agent.risk.types import PortfolioState
 
     state = PortfolioState(
-        nav=Decimal("101500"), cash=Decimal("85000"),
-        positions={}, daily_pnl=Decimal("1500"),
-        weekly_pnl=Decimal("1500"), peak_nav=Decimal("101500"),
-        orders_today=2, last_order_time={}, kill_switch_active=False,
+        nav=Decimal("101500"),
+        cash=Decimal("85000"),
+        positions={},
+        daily_pnl=Decimal("1500"),
+        weekly_pnl=Decimal("1500"),
+        peak_nav=Decimal("101500"),
+        orders_today=2,
+        last_order_time={},
+        kill_switch_active=False,
         evaluation_time=datetime(2024, 1, 2, 15, 30, tzinfo=IST),
     )
     alerter = _alerter()

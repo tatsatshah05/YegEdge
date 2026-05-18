@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import time as _time
 from datetime import date, datetime
-from decimal import Decimal
 from zoneinfo import ZoneInfo
 
 import polars as pl
@@ -119,9 +118,7 @@ class DailyLoop:
             )
 
             if risk_dec.verdict == RiskVerdict.APPROVED:
-                fill = self._executor.submit(
-                    decision, risk_dec, submitted_at=evaluation_time
-                )
+                fill = self._executor.submit(decision, risk_dec, submitted_at=evaluation_time)
                 self._portfolio.apply_fill(fill, evaluation_time=evaluation_time)
                 self._journal.log(
                     JournalEntry(
@@ -129,12 +126,14 @@ class DailyLoop:
                         timestamp=_ensure_ist(fill.timestamp),
                         entry_type=JournalEntryType.FILL,
                         symbol=fill.symbol,
-                        payload=json.dumps({
-                            "action": str(fill.action),
-                            "quantity": fill.quantity,
-                            "price": str(fill.fill_price),
-                            "signal_id": fill.signal_id,
-                        }),
+                        payload=json.dumps(
+                            {
+                                "action": str(fill.action),
+                                "quantity": fill.quantity,
+                                "price": str(fill.fill_price),
+                                "signal_id": fill.signal_id,
+                            }
+                        ),
                     )
                 )
                 self._alerter.send_fill_alert(fill)
@@ -155,11 +154,13 @@ class DailyLoop:
                         timestamp=evaluation_time,
                         entry_type=JournalEntryType.REJECTION,
                         symbol=signal.symbol,
-                        payload=json.dumps({
-                            "reason": str(risk_dec.rejection_reason),
-                            "detail": risk_dec.rejection_detail,
-                            "signal_id": decision.signal_id,
-                        }),
+                        payload=json.dumps(
+                            {
+                                "reason": str(risk_dec.rejection_reason),
+                                "detail": risk_dec.rejection_detail,
+                                "signal_id": decision.signal_id,
+                            }
+                        ),
                     )
                 )
                 self._alerter.send_rejection_alert(
@@ -245,18 +246,18 @@ class DailyLoop:
                 timestamp=last_ts,
                 entry_type=JournalEntryType.PNL,
                 symbol=None,
-                payload=json.dumps({
-                    "session_date": str(session_date),
-                    "final_nav": str(final_state.nav),
-                    "daily_pnl": str(final_state.daily_pnl),
-                    "orders_today": final_state.orders_today,
-                }),
+                payload=json.dumps(
+                    {
+                        "session_date": str(session_date),
+                        "final_nav": str(final_state.nav),
+                        "daily_pnl": str(final_state.daily_pnl),
+                        "orders_today": final_state.orders_today,
+                    }
+                ),
             )
         )
 
-        analyst_cache_hits = (
-            self._analyst._cache.size if self._analyst is not None else 0
-        )
+        analyst_cache_hits = self._analyst._cache.size if self._analyst is not None else 0
 
         self._alerter.send_daily_summary(final_state, session_count=1)
 
@@ -296,11 +297,13 @@ class DailyLoop:
                     timestamp=evaluation_time,
                     entry_type=JournalEntryType.DECISION,
                     symbol=decision.signal.symbol,
-                    payload=json.dumps({
-                        "signal_id": decision.signal_id,
-                        "status": str(decision.status),
-                        "skip_reason": decision.skip_reason,
-                    }),
+                    payload=json.dumps(
+                        {
+                            "signal_id": decision.signal_id,
+                            "status": str(decision.status),
+                            "skip_reason": decision.skip_reason,
+                        }
+                    ),
                 )
             )
         except Exception:
