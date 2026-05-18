@@ -57,7 +57,10 @@ class AIAnalyst:
         """
         signal_id = f"{signal.symbol}:{signal.action}:{signal.timestamp.isoformat()}"
 
-        # 0. Data-quality guard — suppress analysis for suspect or missing data
+        # 0. Data-quality guard — suppress analysis for suspect or missing data.
+        # PARTIAL is intentionally allowed through: the strategy layer already permits
+        # PARTIAL-quality signals (see trend_following._ALLOWED_QUALITIES), so the AI
+        # analyst receiving one should still annotate it rather than silently suppress it.
         if signal.data_quality not in (DataQuality.OK, DataQuality.PARTIAL):
             return ResearchNote(
                 signal_id=signal_id,
@@ -78,8 +81,8 @@ class AIAnalyst:
             log.warning(
                 "ai_analyst.budget_exceeded",
                 signal_id=signal_id,
-                spend_inr=self._spend_inr,
-                cap_inr=float(self._settings.max_monthly_api_spend_inr),
+                spend_inr=str(self._spend_inr),
+                cap_inr=str(self._settings.max_monthly_api_spend_inr),
             )
             return self._budget_exceeded_note(signal_id)
 
