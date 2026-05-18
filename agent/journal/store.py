@@ -13,7 +13,7 @@ logger = structlog.get_logger()
 _CREATE_TABLE = """
 CREATE TABLE IF NOT EXISTS journal (
     row_id      INTEGER PRIMARY KEY AUTOINCREMENT,
-    entry_id    TEXT NOT NULL,
+    entry_id    TEXT NOT NULL UNIQUE,
     timestamp   TEXT NOT NULL,
     entry_type  TEXT NOT NULL,
     symbol      TEXT,
@@ -35,7 +35,12 @@ class JournalStore:
             conn.execute(_CREATE_TABLE)
 
     def log(self, entry: JournalEntry) -> None:
-        """Append a JournalEntry. Never raises on valid input."""
+        """Append a JournalEntry. Raises ValueError for naive timestamps."""
+        if entry.timestamp.tzinfo is None:
+            raise ValueError(
+                "JournalEntry.timestamp must be IST-aware; "
+                f"got naive datetime for entry_id={entry.entry_id!r}"
+            )
         with self._connect() as conn:
             conn.execute(
                 "INSERT INTO journal (entry_id, timestamp, entry_type, symbol, payload) "
