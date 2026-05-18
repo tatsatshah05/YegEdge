@@ -65,14 +65,28 @@ def test_miss_returns_none() -> None:
     assert cache.get(signal) is None
 
 
-def test_put_then_get_returns_note() -> None:
-    """put then get returns a note (not None)."""
-    cache = NoteCache()
-    signal = _make_signal()
-    note = _make_note()
-    cache.put(signal, note)
-    result = cache.get(signal)
-    assert result is not None
+@pytest.mark.parametrize(
+    "regime_fit,expected_regime,expected_r,expected_rr",
+    [
+        (0.0, "weak", 1.99, "low"),
+        (0.49, "weak", 1.99, "low"),
+        (0.5, "moderate", 2.0, "medium"),
+        (0.79, "moderate", 2.99, "medium"),
+        (0.8, "strong", 3.0, "high"),
+        (1.0, "strong", 4.0, "high"),
+    ],
+)
+def test_bucket_boundaries(
+    regime_fit: float,
+    expected_regime: str,
+    expected_r: float,
+    expected_rr: str,
+) -> None:
+    from agent.ai.cache import _cache_key
+
+    sig = _make_signal(regime_fit=regime_fit, expected_r=expected_r)
+    key = _cache_key(sig)
+    assert key == f"{sig.action}:{expected_regime}:{expected_rr}"
 
 
 def test_hit_sets_cached_true() -> None:

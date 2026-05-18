@@ -2,8 +2,12 @@ from __future__ import annotations
 
 import dataclasses
 
+import structlog
+
 from agent.decision.types import ResearchNote
 from agent.strategies.types import Signal
+
+log = structlog.get_logger()
 
 
 def _regime_bucket(regime_fit: float) -> str:
@@ -32,6 +36,12 @@ class NoteCache:
     Symbol is intentionally excluded from the key: structurally identical signals on
     different symbols share a cache entry because the research note captures the pattern,
     not symbol-specific data.
+
+    NOTE: The CLAUDE.md spec mentions (regime_label, signal_template, R/R_bucket, sector)
+    as the cache key dimensions. `sector` is intentionally deferred from this phase because
+    `Signal` carries no sector field. Add it when Signal is enriched with sector data.
+    A cached veto from a sector-specific event may propagate to other sectors — an accepted
+    limitation for this phase.
     """
 
     def __init__(self) -> None:
@@ -42,13 +52,15 @@ class NoteCache:
         key = _cache_key(signal)
         note = self._store.get(key)
         if note is None:
+            log.debug("note_cache.miss", key=key)
             return None
+        log.debug("note_cache.hit", key=key)
         return dataclasses.replace(note, cached=True)
 
     def put(self, signal: Signal, note: ResearchNote) -> None:
         """Store note under the cache key derived from signal."""
         key = _cache_key(signal)
-        self._store[key] = note
+        self._store[key] = dataclasses.replace(note, cached=False)
 
     @property
     def size(self) -> int:
