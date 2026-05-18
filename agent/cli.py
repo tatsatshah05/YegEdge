@@ -264,6 +264,7 @@ def run_paper(session_date_str: str | None, warmup_bars: int) -> None:
     from agent.data.cache import ParquetCache
     from agent.data.universe import UniverseLoader
     from agent.execution.paper import PaperExecution
+    from agent.features.pipeline import FeaturePipeline
     from agent.journal.store import JournalStore
     from agent.monitoring.alerter import TelegramAlerter
     from agent.monitoring.heartbeat import Heartbeat
@@ -278,9 +279,7 @@ def run_paper(session_date_str: str | None, warmup_bars: int) -> None:
     settings = AppSettings()
 
     session_date = (
-        date_type.fromisoformat(session_date_str)
-        if session_date_str
-        else date_type.today()
+        date_type.fromisoformat(session_date_str) if session_date_str else date_type.today()
     )
 
     console.print(f"[bold]YegEdge Paper Trading — {session_date}[/bold]")
@@ -299,17 +298,32 @@ def run_paper(session_date_str: str | None, warmup_bars: int) -> None:
         console.print(f"[red]No cached data for {example_sym}/{timeframe}[/red]")
         sys.exit(1)
 
-    earliest, _ = report[example_sym][timeframe]
-    session_start = datetime(session_date.year, session_date.month, session_date.day, 9, 15, tzinfo=IST)
-    session_end = datetime(session_date.year, session_date.month, session_date.day, 15, 30, tzinfo=IST)
+    session_start = datetime(
+        session_date.year, session_date.month, session_date.day, 9, 15, tzinfo=IST
+    )
+    session_end = datetime(
+        session_date.year, session_date.month, session_date.day, 15, 30, tzinfo=IST
+    )
 
     warmup_frames = []
     session_frames = []
+    pipeline = FeaturePipeline()
     for sym in universe.symbols():
-        wdf = cache.read(symbol=sym, timeframe=timeframe, start=earliest, end=session_start)
-        sdf = cache.read(symbol=sym, timeframe=timeframe, start=session_start, end=session_end)
+        if sym not in report or timeframe not in report.get(sym, {}):
+            continue
+        sym_earliest, _ = report[sym][timeframe]
+        # Load all history for this symbol so rolling indicators are correctly seeded
+        all_sym = cache.read(symbol=sym, timeframe=timeframe, start=sym_earliest, end=session_end)
+        if len(all_sym) == 0:
+            continue
+        # Enrich per-symbol — rolling windows must not cross symbol boundaries
+        enriched = pipeline.run(all_sym)
+        wdf = enriched.filter(pl.col("timestamp") < session_start).tail(warmup_bars)
+        sdf = enriched.filter(
+            (pl.col("timestamp") >= session_start) & (pl.col("timestamp") <= session_end)
+        )
         if len(wdf) > 0:
-            warmup_frames.append(wdf.tail(warmup_bars))
+            warmup_frames.append(wdf)
         if len(sdf) > 0:
             session_frames.append(sdf)
 
@@ -368,4 +382,6 @@ def run_paper(session_date_str: str | None, warmup_bars: int) -> None:
     console.print(f"Paper sessions completed: {new_count}/60")
 
     if counter.is_ready_for_live():
-        console.print("[bold yellow]60 sessions complete — review results before enabling live trading.[/bold yellow]")
+        console.print(
+            "[bold yellow]60 sessions complete — review results before enabling live trading.[/bold yellow]"
+        )
