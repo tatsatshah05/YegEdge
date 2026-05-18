@@ -10,6 +10,7 @@ import structlog
 from rich.console import Console
 from rich.table import Table
 
+from agent.backtest.runner import BacktestRunner
 from config.settings import AppSettings
 
 log = structlog.get_logger()
@@ -387,3 +388,110 @@ def run_paper(session_date_str: str | None, warmup_bars: int) -> None:
             "review results before enabling live trading.[/bold yellow]"
         )
         console.print(_msg)
+
+
+# ---------------------------------------------------------------------------
+# backtest command
+# ---------------------------------------------------------------------------
+
+
+@cli.command()
+@click.option("--symbol", required=True, help="NSE symbol to backtest (e.g. HDFCBANK)")
+@click.option(
+    "--timeframe",
+    default="60m",
+    show_default=True,
+    type=click.Choice(["15m", "60m", "1d"]),
+    help="Bar timeframe",
+)
+@click.option("--start", "start_str", required=True, help="Start date YYYY-MM-DD (inclusive)")
+@click.option("--end", "end_str", required=True, help="End date YYYY-MM-DD (inclusive)")
+@click.option(
+    "--warmup",
+    default=100,
+    show_default=True,
+    help="Warmup bars before each session for indicator seeding",
+)
+def backtest(symbol: str, timeframe: str, start_str: str, end_str: str, warmup: int) -> None:
+    """Replay historical bars through the strategy and report net-of-cost performance."""
+    from datetime import date as date_type
+    from decimal import Decimal
+
+    from agent.data.cache import ParquetCache
+    from agent.risk.manager import RiskManager
+    from agent.risk.rules import load_risk_rules
+    from agent.strategies.trend_following import TrendFollowingStrategy
+
+    settings = AppSettings()
+    start_date = date_type.fromisoformat(start_str)
+    end_date = date_type.fromisoformat(end_str)
+
+    console.print(f"[bold]YegEdge Backtest — {symbol} {timeframe} {start_date} → {end_date}[/bold]")
+
+    cache = ParquetCache(root=settings.parquet_cache_dir)
+    strategy = TrendFollowingStrategy()
+    risk_rules = load_risk_rules(Path("config/risk_rules.yaml"))
+    risk_manager = RiskManager(rules=risk_rules)
+
+    runner = BacktestRunner(
+        strategy=strategy,
+        risk_manager=risk_manager,
+        cache=cache,
+        initial_nav=Decimal(str(settings.paper_starting_capital)),
+    )
+
+    report = runner.run(
+        symbol=symbol,
+        timeframe=timeframe,
+        start_date=start_date,
+        end_date=end_date,
+        warmup_bars=warmup,
+    )
+
+    if not report.sessions:
+        console.print(
+            f"[yellow]No cached data or sessions for {symbol}/{timeframe} in range. "
+            "Run `refresh` first if cache is empty.[/yellow]"
+        )
+        sys.exit(1)
+
+    m = report.metrics
+
+    console.print()
+    table = Table(title="Backtest Results", show_header=True, header_style="bold cyan")
+    table.add_column("Metric")
+    table.add_column("Value", justify="right")
+    table.add_row("Sessions", str(m.total_sessions))
+    table.add_row("Win Rate", f"{m.win_rate:.1%}")
+    table.add_row("Gross P&L", f"₹{m.total_gross_pnl:,.2f}")
+    table.add_row("Total Costs", f"₹{m.total_costs:,.2f}")
+    table.add_row("Net P&L", f"₹{m.total_net_pnl:+,.2f}")
+    table.add_row("Sharpe Ratio", f"{m.sharpe_ratio:.3f}")
+    table.add_row("Max Drawdown", f"{m.max_drawdown:.2%}")
+    table.add_row("CAGR", f"{m.cagr:.2%}")
+    table.add_row("Initial NAV", f"₹{m.initial_nav:,.2f}")
+    table.add_row("Final NAV", f"₹{m.final_nav:,.2f}")
+    console.print(table)
+
+    if len(report.sessions) > 0:
+        console.print()
+        detail = Table(title="Last 10 Sessions", show_header=True, header_style="bold")
+        detail.add_column("Date")
+        detail.add_column("Bars", justify="right")
+        detail.add_column("Fills", justify="right")
+        detail.add_column("Gross P&L", justify="right")
+        detail.add_column("Costs", justify="right")
+        detail.add_column("Net P&L", justify="right")
+        detail.add_column("NAV", justify="right")
+        for s in report.sessions[-10:]:
+            pnl_color = "green" if s.net_pnl >= 0 else "red"
+            detail.add_row(
+                str(s.session_date),
+                str(s.bars_processed),
+                str(s.fills),
+                f"₹{s.gross_pnl:,.2f}",
+                f"₹{s.costs:,.2f}",
+                f"[{pnl_color}]₹{s.net_pnl:+,.2f}[/{pnl_color}]",
+                f"₹{s.final_nav:,.2f}",
+            )
+        console.print(detail)
