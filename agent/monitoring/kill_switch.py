@@ -6,6 +6,8 @@ import structlog
 
 logger = structlog.get_logger()
 
+# Default is relative to CWD. In production, always pass an explicit absolute path
+# (e.g., Path(settings.project_root) / ".kill_switch") to avoid CWD ambiguity.
 _DEFAULT_FLAG_PATH = Path(".kill_switch")
 
 

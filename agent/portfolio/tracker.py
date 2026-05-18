@@ -144,7 +144,13 @@ class PortfolioTracker:
         return self._snapshot(self._compute_nav())
 
     def activate_kill_switch(self) -> PortfolioState:
-        """Activate the kill switch. All subsequent RiskManager calls will be rejected."""
+        """Flip the in-session kill switch. All subsequent RiskManager calls will be rejected.
+
+        This sets an in-memory boolean that resets on process restart. For cross-restart
+        durability, use KillSwitch (agent/monitoring/kill_switch.py) alongside this method.
+        The DailyLoop polls KillSwitch.is_active() each bar and calls this method when active.
+        Recovery requires both removing the flag file (KillSwitch.deactivate()) and restarting.
+        """
         self._kill_switch_active = True
         logger.warning("portfolio_tracker.kill_switch_activated")
         return self._snapshot(self._compute_nav())
