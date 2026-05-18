@@ -70,6 +70,9 @@ class DailyLoop:
         self._heartbeat = heartbeat
         self._alerter = alerter
         self._decision_engine = DecisionEngine()
+        self._last_signals = 0
+        self._last_decisions = 0
+        self._last_rejections = 0
 
     def process_bar(
         self,
@@ -83,6 +86,9 @@ class DailyLoop:
 
         signals = self._strategy.generate(df)
         if not signals:
+            self._last_signals = 0
+            self._last_decisions = 0
+            self._last_rejections = 0
             return []
 
         decisions = self._decision_engine.evaluate(
@@ -160,6 +166,9 @@ class DailyLoop:
                     signal.symbol, reason=str(risk_dec.rejection_reason)
                 )
 
+        self._last_signals = len(signals)
+        self._last_decisions = len(decisions)
+        self._last_rejections = len(decisions) - len(fills)
         return fills
 
     def run(
@@ -194,6 +203,9 @@ class DailyLoop:
 
         all_fills: list[Fill] = []
         bars_processed = 0
+        signals_generated = 0
+        decisions_made = 0
+        rejections_count = 0
 
         combined = pl.concat([warmup_df, session_df]) if len(warmup_df) > 0 else session_df
         warmup_len = len(warmup_df)
@@ -211,6 +223,9 @@ class DailyLoop:
 
             fills = self.process_bar(window, evaluation_time=evaluation_time)
             bars_processed += 1
+            signals_generated += self._last_signals
+            decisions_made += self._last_decisions
+            rejections_count += self._last_rejections
             all_fills.extend(fills)
 
             self._heartbeat.beat(self._portfolio.state, ts=evaluation_time)
@@ -248,10 +263,10 @@ class DailyLoop:
         result = DailySessionResult(
             session_date=session_date,
             bars_processed=bars_processed,
-            signals_generated=0,
-            decisions_made=0,
+            signals_generated=signals_generated,
+            decisions_made=decisions_made,
             fills=tuple(all_fills),
-            rejections=0,
+            rejections=rejections_count,
             ai_cache_hits=analyst_cache_hits,
             final_nav=final_state.nav,
             daily_pnl=final_state.daily_pnl,

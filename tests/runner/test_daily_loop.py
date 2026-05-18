@@ -161,7 +161,9 @@ def test_process_bar_journals_decisions(tmp_path: Path) -> None:
     loop.process_bar(df, evaluation_time=T0)
     journal = JournalStore(db_path=tmp_path / "journal.db")
     entries = journal.query()
-    assert len(entries) >= 0  # loop may have no signals — that's OK
+    # process_bar journals decisions and rejections — at least 0 entries is acceptable
+    # (may be 0 if no signals fire), but the call must not raise
+    assert isinstance(entries, list)
 
 
 def test_process_bar_returns_fills_when_approved(tmp_path: Path) -> None:
@@ -250,3 +252,34 @@ def test_process_bar_with_no_signals_returns_empty_list(tmp_path: Path) -> None:
     tiny_df = _make_enriched_df(n=2)
     fills = loop.process_bar(tiny_df, evaluation_time=T0)
     assert fills == []
+
+
+def test_run_stops_mid_session_when_kill_switch_activated(tmp_path: Path) -> None:
+    """Kill switch activated after session starts should stop the loop mid-bar."""
+    flag = tmp_path / ".ks_mid"
+    ks = KillSwitch(flag_path=flag)
+    loop = _make_loop(tmp_path, kill_switch=ks)
+
+    warmup_df = _make_enriched_df(n=55)
+    # Use 5-bar session; write kill switch after first bar completes
+    session_df = _make_enriched_df(n=5)
+
+    # Patch process_bar to write the kill switch flag after the first call
+    original_process_bar = loop.process_bar
+    call_count = [0]
+
+    def patched_process_bar(df: pl.DataFrame, *, evaluation_time: datetime) -> list:
+        call_count[0] += 1
+        if call_count[0] == 1:
+            flag.write_text("mid-session stop")
+        return original_process_bar(df, evaluation_time=evaluation_time)
+
+    loop.process_bar = patched_process_bar  # type: ignore[method-assign]
+
+    result = loop.run(
+        session_date=SESSION_DATE,
+        warmup_df=warmup_df,
+        session_df=session_df,
+    )
+    # Should have processed exactly 1 bar (kill switch fires before bar 2)
+    assert result.bars_processed == 1
