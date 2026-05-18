@@ -19,6 +19,11 @@ class PortfolioTracker:
     apply_fill() updates internal state and returns a snapshot.
     mark_to_market() revalues open positions at current prices and returns a snapshot.
     state property returns the latest snapshot without modifying internal state.
+
+    NOTE: `nav` in snapshots returned by `state` is book-cost NAV (positions valued at
+    average_price). Snapshots returned by `mark_to_market()` carry live-price NAV.
+    `peak_nav` may therefore exceed `nav` between mark-to-market calls — this is expected,
+    not a drawdown.
     """
 
     def __init__(
@@ -43,12 +48,14 @@ class PortfolioTracker:
 
         ENTER_LONG: deduct cash, create/increase position at fill_price.
         EXIT_LONG:  add cash proceeds, realize P&L, remove/reduce position.
+        State mutations (orders_today, last_order_time) happen inside each branch so
+        that ghost exits against non-existent positions do not consume an order slot.
         """
         self._evaluation_time = evaluation_time
-        self._orders_today += 1
-        self._last_order_time[fill.symbol] = fill.timestamp
 
         if fill.action == Action.ENTER_LONG:
+            self._orders_today += 1
+            self._last_order_time[fill.symbol] = fill.timestamp
             cost = fill.fill_price * fill.quantity
             self._cash -= cost
             existing = self._positions.get(fill.symbol)
@@ -75,12 +82,23 @@ class PortfolioTracker:
         elif fill.action == Action.EXIT_LONG:
             existing = self._positions.get(fill.symbol)
             if existing is not None:
-                realized_pnl = (fill.fill_price - existing.average_price) * fill.quantity
+                self._orders_today += 1
+                self._last_order_time[fill.symbol] = fill.timestamp
+                exit_qty = min(fill.quantity, existing.quantity)
+                if exit_qty < fill.quantity:
+                    logger.warning(
+                        "portfolio_tracker.oversized_exit_clamped",
+                        symbol=fill.symbol,
+                        fill_qty=fill.quantity,
+                        held_qty=existing.quantity,
+                        clamped_qty=exit_qty,
+                    )
+                realized_pnl = (fill.fill_price - existing.average_price) * exit_qty
                 self._daily_pnl += realized_pnl
                 self._weekly_pnl += realized_pnl
-                proceeds = fill.fill_price * fill.quantity
+                proceeds = fill.fill_price * exit_qty
                 self._cash += proceeds
-                remaining_qty = existing.quantity - fill.quantity
+                remaining_qty = existing.quantity - exit_qty
                 if remaining_qty <= 0:
                     del self._positions[fill.symbol]
                 else:

@@ -139,3 +139,41 @@ def test_multiple_symbols_tracked_independently() -> None:
     assert "TCS" in state.positions
     assert state.positions["HDFCBANK"].quantity == 10
     assert state.positions["TCS"].quantity == 5
+
+
+def test_apply_enter_long_addon_uses_weighted_average() -> None:
+    """Add-on entry must compute weighted average price, not simple average."""
+    tracker = _tracker()
+    # First entry: 10 shares at 1700
+    tracker.apply_fill(_make_fill(quantity=10, price=Decimal("1700")), evaluation_time=T0)
+    # Add-on: 10 more shares at 1800 → weighted avg = (10*1700 + 10*1800) / 20 = 1750
+    fill2 = _make_fill(quantity=10, price=Decimal("1800"), ts=T1)
+    state = tracker.apply_fill(fill2, evaluation_time=T1)
+    assert state.positions["HDFCBANK"].quantity == 20
+    assert state.positions["HDFCBANK"].average_price == Decimal("1750.00")
+
+
+def test_partial_exit_leaves_correct_residual() -> None:
+    """Partial exit reduces quantity but keeps position with original average_price."""
+    tracker = _tracker()
+    tracker.apply_fill(_make_fill(quantity=10, price=Decimal("1700")), evaluation_time=T0)
+    # Sell only 4 of 10 shares
+    exit_fill = _make_fill(action=Action.EXIT_LONG, quantity=4, price=Decimal("1750"), ts=T1)
+    state = tracker.apply_fill(exit_fill, evaluation_time=T1)
+    assert "HDFCBANK" in state.positions
+    assert state.positions["HDFCBANK"].quantity == 6
+    assert state.positions["HDFCBANK"].average_price == Decimal("1700")
+    # P&L = 4 * (1750 - 1700) = 200
+    assert state.daily_pnl == Decimal("200")
+
+
+def test_exit_long_with_no_position_is_no_op() -> None:
+    """EXIT_LONG on a symbol with no open position must not affect orders_today or cash."""
+    tracker = _tracker()
+    initial_state = tracker.state
+    exit_fill = _make_fill(action=Action.EXIT_LONG, quantity=10, price=Decimal("1750"), ts=T0)
+    state = tracker.apply_fill(exit_fill, evaluation_time=T0)
+    # No orders counted, no cash change
+    assert state.orders_today == 0
+    assert state.cash == INITIAL_NAV
+    assert len(state.positions) == 0
