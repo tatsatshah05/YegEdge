@@ -374,7 +374,7 @@ def run_paper(session_date_str: str | None, warmup_bars: int) -> None:
     counter = PaperSessionCounter(path=Path("data/paper_sessions.json"))
     new_count = counter.increment()
 
-    console.print(f"\n[bold green]Session complete.[/bold green]")
+    console.print("\n[bold green]Session complete.[/bold green]")
     console.print(f"Bars processed: {result.bars_processed}")
     console.print(f"Fills: {len(result.fills)}")
     console.print(f"Final NAV: ₹{result.final_nav:,.2f}")
@@ -382,6 +382,8 @@ def run_paper(session_date_str: str | None, warmup_bars: int) -> None:
     console.print(f"Paper sessions completed: {new_count}/60")
 
     if counter.is_ready_for_live():
-        console.print(
-            "[bold yellow]60 sessions complete — review results before enabling live trading.[/bold yellow]"
+        _msg = (
+            "[bold yellow]60 sessions complete — "
+            "review results before enabling live trading.[/bold yellow]"
         )
+        console.print(_msg)
