@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import dataclasses
+from decimal import Decimal
 from zoneinfo import ZoneInfo
 
 import anthropic
@@ -8,6 +9,7 @@ import structlog
 
 from agent.ai.cache import NoteCache
 from agent.ai.prompt import NOTE_SCHEMA, SYSTEM_PROMPT, build_prompt
+from agent.data.types import DataQuality
 from agent.decision.types import ResearchNote
 from agent.strategies.types import Signal
 from config.settings import AppSettings
@@ -40,7 +42,7 @@ class AIAnalyst:
         self._settings = settings or AppSettings()
         self._cache = cache or NoteCache()
         self._client = _client or anthropic.Anthropic(api_key=self._settings.anthropic_api_key)
-        self._spend_inr: float = 0.0  # running tally for this session
+        self._spend_inr: Decimal = Decimal("0")  # running tally for this session
 
     def analyse(
         self,
@@ -54,6 +56,22 @@ class AIAnalyst:
         when the monthly cap has been hit.
         """
         signal_id = f"{signal.symbol}:{signal.action}:{signal.timestamp.isoformat()}"
+
+        # 0. Data-quality guard — suppress analysis for suspect or missing data
+        if signal.data_quality not in (DataQuality.OK, DataQuality.PARTIAL):
+            return ResearchNote(
+                signal_id=signal_id,
+                bullish_case="Data quality suspect — analysis suppressed.",
+                bearish_case="Data quality suspect — analysis suppressed.",
+                dominant_risk=f"Signal data_quality={signal.data_quality} is suspect or missing.",
+                regime_fit_assessment="Not assessed.",
+                confidence_qualitative="LOW",
+                veto=False,
+                veto_reason=None,
+                model_used="none",
+                tokens_used=0,
+                cached=False,
+            )
 
         # 1. Budget check — if over cap, return a degraded note without calling Claude
         if self._over_budget():
@@ -92,7 +110,7 @@ class AIAnalyst:
     # ------------------------------------------------------------------
 
     def _over_budget(self) -> bool:
-        return self._spend_inr >= float(self._settings.max_monthly_api_spend_inr)
+        return self._spend_inr >= self._settings.max_monthly_api_spend_inr
 
     def _call_claude(self, *, signal_id: str, prompt: str, model: str) -> ResearchNote:
         response = self._client.messages.create(
@@ -157,9 +175,9 @@ class AIAnalyst:
             cached=False,
         )
 
-    def _estimate_cost_inr(self, model: str, tokens: int) -> float:
+    def _estimate_cost_inr(self, model: str, tokens: int) -> Decimal:
         """Very rough token→INR estimate. Actual billing happens at Anthropic."""
         # Haiku: ~$0.25/1M input tokens. Sonnet: ~$3/1M input tokens.
         # 1 USD ≈ 83 INR. These are floor estimates; adjust as pricing changes.
-        usd_per_1m = 0.25 if "haiku" in model else 3.0
-        return (tokens / 1_000_000) * usd_per_1m * 83.0
+        usd_per_1m = Decimal("0.25") if "haiku" in model else Decimal("3.0")
+        return (Decimal(str(tokens)) / Decimal("1000000")) * usd_per_1m * Decimal("83")

@@ -152,9 +152,9 @@ def test_budget_exceeded_returns_degraded_note_without_api_call() -> None:
 
 def test_spend_tally_increases_after_api_call() -> None:
     analyst, _ = _make_analyst()
-    assert analyst._spend_inr == 0.0
+    assert analyst._spend_inr == Decimal("0")
     analyst.analyse(_make_signal())
-    assert analyst._spend_inr > 0.0
+    assert analyst._spend_inr > Decimal("0")
 
 
 def test_missing_tool_use_block_raises_runtime_error() -> None:
@@ -165,3 +165,33 @@ def test_missing_tool_use_block_raises_runtime_error() -> None:
     analyst, _ = _make_analyst(mock_response=mock_response)
     with pytest.raises(RuntimeError, match="submit_research_note"):
         analyst.analyse(_make_signal())
+
+
+def test_suspect_data_quality_returns_degraded_note_without_api_call() -> None:
+    import dataclasses
+
+    from agent.data.types import DataQuality
+
+    sig = _make_signal()
+    # Override data_quality to SUSPECT using dataclasses.replace since Signal is frozen
+    sig_suspect = dataclasses.replace(sig, data_quality=DataQuality.SUSPECT)
+    analyst, mock_client = _make_analyst()
+    note = analyst.analyse(sig_suspect)
+    assert mock_client.messages.create.call_count == 0
+    assert note.veto is False
+    assert "suspect" in note.dominant_risk.lower()
+
+
+def test_budget_check_precedes_cache_lookup() -> None:
+    """Even with a cache hit available, over-budget returns degraded note."""
+    settings = _make_settings(spend_cap=1500.0)
+    analyst, _ = _make_analyst(settings=settings)
+    sig = _make_signal()
+    # Populate cache with a real note via first call
+    analyst.analyse(sig)
+    assert analyst._spend_inr > Decimal("0")
+    # Now exhaust the budget
+    object.__setattr__(settings, "max_monthly_api_spend_inr", Decimal("0"))
+    # Second call: cache has a hit, but budget is exceeded — must return degraded note
+    note2 = analyst.analyse(sig)
+    assert "Budget cap" in note2.bullish_case
