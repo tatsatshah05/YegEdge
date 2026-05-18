@@ -7,6 +7,7 @@ import structlog
 
 from agent.execution.types import Fill
 from agent.risk.types import PortfolioState
+from agent.strategies.types import Action
 
 logger = structlog.get_logger()
 
@@ -36,10 +37,10 @@ class TelegramAlerter:
                 timeout=5,
             ).raise_for_status()
         except Exception:
-            logger.warning("telegram_alerter.send_failed", text=text[:80])
+            logger.warning("telegram_alerter.send_failed", exc_info=True)
 
     def send_fill_alert(self, fill: Fill) -> None:
-        direction = "ENTER" if str(fill.action) == "enter_long" else "EXIT"
+        direction = "ENTER" if fill.action == Action.ENTER_LONG else "EXIT"
         self.send(
             f"[PAPER {direction}] {fill.symbol} x{fill.quantity} @ ₹{fill.fill_price}"
             f"\nStrategy: {fill.strategy_name}"
