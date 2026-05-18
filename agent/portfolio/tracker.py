@@ -143,6 +143,12 @@ class PortfolioTracker:
     def state(self) -> PortfolioState:
         return self._snapshot(self._compute_nav())
 
+    def activate_kill_switch(self) -> PortfolioState:
+        """Activate the kill switch. All subsequent RiskManager calls will be rejected."""
+        self._kill_switch_active = True
+        logger.warning("portfolio_tracker.kill_switch_activated")
+        return self._snapshot(self._compute_nav())
+
     def _compute_nav(self) -> Decimal:
         return self._cash + sum(
             pos.average_price * pos.quantity for pos in self._positions.values()
