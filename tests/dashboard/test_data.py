@@ -25,37 +25,50 @@ T0 = datetime(2024, 1, 2, 15, 30, tzinfo=IST)
 
 def _seed_pnl(db_path: Path, session_date: str, nav: float, pnl: float, orders: int = 2) -> None:
     store = JournalStore(db_path=db_path)
-    store.log(JournalEntry(
-        entry_id=f"pnl-{session_date}",
-        timestamp=T0,
-        entry_type=JournalEntryType.PNL,
-        symbol=None,
-        payload=json.dumps({"session_date": session_date, "final_nav": nav,
-                             "daily_pnl": pnl, "orders_today": orders}),
-    ))
+    store.log(
+        JournalEntry(
+            entry_id=f"pnl-{session_date}",
+            timestamp=T0,
+            entry_type=JournalEntryType.PNL,
+            symbol=None,
+            payload=json.dumps(
+                {
+                    "session_date": session_date,
+                    "final_nav": nav,
+                    "daily_pnl": pnl,
+                    "orders_today": orders,
+                }
+            ),
+        )
+    )
 
 
 def _seed_fill(db_path: Path, entry_id: str, symbol: str, qty: int, price: float) -> None:
     store = JournalStore(db_path=db_path)
-    store.log(JournalEntry(
-        entry_id=entry_id,
-        timestamp=T0,
-        entry_type=JournalEntryType.FILL,
-        symbol=symbol,
-        payload=json.dumps({"action": "enter_long", "quantity": qty,
-                             "price": price, "signal_id": "test"}),
-    ))
+    store.log(
+        JournalEntry(
+            entry_id=entry_id,
+            timestamp=T0,
+            entry_type=JournalEntryType.FILL,
+            symbol=symbol,
+            payload=json.dumps(
+                {"action": "enter_long", "quantity": qty, "price": price, "signal_id": "test"}
+            ),
+        )
+    )
 
 
 def _seed_rejection(db_path: Path, entry_id: str, symbol: str, reason: str) -> None:
     store = JournalStore(db_path=db_path)
-    store.log(JournalEntry(
-        entry_id=entry_id,
-        timestamp=T0,
-        entry_type=JournalEntryType.REJECTION,
-        symbol=symbol,
-        payload=json.dumps({"reason": reason, "detail": "test", "signal_id": "test"}),
-    ))
+    store.log(
+        JournalEntry(
+            entry_id=entry_id,
+            timestamp=T0,
+            entry_type=JournalEntryType.REJECTION,
+            symbol=symbol,
+            payload=json.dumps({"reason": reason, "detail": "test", "signal_id": "test"}),
+        )
+    )
 
 
 def test_load_pnl_history_returns_correct_rows(tmp_path: Path) -> None:
@@ -107,6 +120,7 @@ def test_load_session_count_zero_when_no_file(tmp_path: Path) -> None:
 
 def test_load_session_count_reflects_increments(tmp_path: Path) -> None:
     from agent.runner.session_counter import PaperSessionCounter
+
     path = tmp_path / "sessions.json"
     c = PaperSessionCounter(path=path)
     c.increment()
@@ -116,8 +130,14 @@ def test_load_session_count_reflects_increments(tmp_path: Path) -> None:
 
 
 def test_compute_equity_stats_empty_dataframe() -> None:
-    empty_df = pl.DataFrame(schema={"session_date": pl.Utf8, "final_nav": pl.Float64,
-                                     "daily_pnl": pl.Float64, "orders_today": pl.Int64})
+    empty_df = pl.DataFrame(
+        schema={
+            "session_date": pl.Utf8,
+            "final_nav": pl.Float64,
+            "daily_pnl": pl.Float64,
+            "orders_today": pl.Int64,
+        }
+    )
     stats = compute_equity_stats(empty_df)
     assert stats["total_sessions"] == 0
     assert stats["win_rate"] == 0.0

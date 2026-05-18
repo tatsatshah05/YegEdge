@@ -48,12 +48,14 @@ def load_pnl_history(db_path: Path, limit: int = 500) -> pl.DataFrame:
     for e in entries:
         try:
             d = json.loads(e.payload)
-            rows.append({
-                "session_date": str(d.get("session_date", "")),
-                "final_nav": float(d.get("final_nav", 0)),
-                "daily_pnl": float(d.get("daily_pnl", 0)),
-                "orders_today": int(d.get("orders_today", 0)),
-            })
+            rows.append(
+                {
+                    "session_date": str(d.get("session_date", "")),
+                    "final_nav": float(d.get("final_nav", 0)),
+                    "daily_pnl": float(d.get("daily_pnl", 0)),
+                    "orders_today": int(d.get("orders_today", 0)),
+                }
+            )
         except (json.JSONDecodeError, KeyError, ValueError):
             continue
     if not rows:
@@ -73,14 +75,16 @@ def load_fills(db_path: Path, limit: int = 1000) -> pl.DataFrame:
     for e in entries:
         try:
             d = json.loads(e.payload)
-            rows.append({
-                "timestamp": e.timestamp.isoformat(),
-                "symbol": e.symbol or "",
-                "action": str(d.get("action", "")),
-                "quantity": int(d.get("quantity", 0)),
-                "price": float(d.get("price", 0)),
-                "signal_id": str(d.get("signal_id", "")),
-            })
+            rows.append(
+                {
+                    "timestamp": e.timestamp.isoformat(),
+                    "symbol": e.symbol or "",
+                    "action": str(d.get("action", "")),
+                    "quantity": int(d.get("quantity", 0)),
+                    "price": float(d.get("price", 0)),
+                    "signal_id": str(d.get("signal_id", "")),
+                }
+            )
         except (json.JSONDecodeError, KeyError, ValueError):
             continue
     if not rows:
@@ -99,12 +103,14 @@ def load_rejections(db_path: Path, limit: int = 1000) -> pl.DataFrame:
     for e in entries:
         try:
             d = json.loads(e.payload)
-            rows.append({
-                "timestamp": e.timestamp.isoformat(),
-                "symbol": e.symbol or "",
-                "reason": str(d.get("reason", "")),
-                "detail": str(d.get("detail", "")),
-            })
+            rows.append(
+                {
+                    "timestamp": e.timestamp.isoformat(),
+                    "symbol": e.symbol or "",
+                    "reason": str(d.get("reason", "")),
+                    "detail": str(d.get("detail", "")),
+                }
+            )
         except (json.JSONDecodeError, KeyError, ValueError):
             continue
     if not rows:
