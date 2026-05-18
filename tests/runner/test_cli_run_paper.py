@@ -26,13 +26,13 @@ def test_run_paper_exits_when_no_cache(tmp_path: Path) -> None:
         s.upstox_access_token = ""
         MockSettings.return_value = s
         result = runner.invoke(cli, ["run-paper"])
-    assert result.exit_code in (0, 1)
+    assert result.exit_code == 1
+    assert "No cached data" in result.output or "cached" in result.output.lower()
 
 
 def test_runner_module_has_main() -> None:
+    from pathlib import Path
     import importlib.util
-    spec = importlib.util.spec_from_file_location(
-        "agent.runner.__main__",
-        "agent/runner/__main__.py",
-    )
+    path = Path(__file__).parent.parent.parent / "agent" / "runner" / "__main__.py"
+    spec = importlib.util.spec_from_file_location("agent.runner.__main__", path)
     assert spec is not None
