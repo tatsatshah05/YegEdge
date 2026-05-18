@@ -234,3 +234,138 @@ def verify(symbol: str | None, timeframe: str | None) -> None:
             )
 
     console.print(table)
+
+
+# ---------------------------------------------------------------------------
+# run-paper command
+# ---------------------------------------------------------------------------
+
+
+@cli.command("run-paper")
+@click.option(
+    "--date",
+    "session_date_str",
+    default=None,
+    help="Session date as YYYY-MM-DD (default: today)",
+)
+@click.option(
+    "--warmup-bars",
+    default=200,
+    show_default=True,
+    help="Number of historical bars to load for indicator warm-up.",
+)
+def run_paper(session_date_str: str | None, warmup_bars: int) -> None:
+    """Run one paper trading session by replaying cached bars."""
+    from datetime import date as date_type
+    from decimal import Decimal
+
+    import polars as pl
+
+    from agent.data.cache import ParquetCache
+    from agent.data.universe import UniverseLoader
+    from agent.execution.paper import PaperExecution
+    from agent.journal.store import JournalStore
+    from agent.monitoring.alerter import TelegramAlerter
+    from agent.monitoring.heartbeat import Heartbeat
+    from agent.monitoring.kill_switch import KillSwitch
+    from agent.portfolio.tracker import PortfolioTracker
+    from agent.risk.manager import RiskManager
+    from agent.risk.rules import load_risk_rules
+    from agent.runner.daily_loop import DailyLoop
+    from agent.runner.session_counter import PaperSessionCounter
+    from agent.strategies.trend_following import TrendFollowingStrategy
+
+    settings = AppSettings()
+
+    session_date = (
+        date_type.fromisoformat(session_date_str)
+        if session_date_str
+        else date_type.today()
+    )
+
+    console.print(f"[bold]YegEdge Paper Trading — {session_date}[/bold]")
+
+    cache = ParquetCache(root=settings.parquet_cache_dir)
+    report = cache.coverage_report()
+    if not report:
+        console.print("[yellow]No cached data. Run `refresh` first.[/yellow]")
+        sys.exit(1)
+
+    universe = UniverseLoader(Path("config/universe.yaml"))
+    timeframe = universe.primary_timeframe
+
+    example_sym = universe.symbols()[0]
+    if example_sym not in report or timeframe not in report.get(example_sym, {}):
+        console.print(f"[red]No cached data for {example_sym}/{timeframe}[/red]")
+        sys.exit(1)
+
+    earliest, _ = report[example_sym][timeframe]
+    session_start = datetime(session_date.year, session_date.month, session_date.day, 9, 15, tzinfo=IST)
+    session_end = datetime(session_date.year, session_date.month, session_date.day, 15, 30, tzinfo=IST)
+
+    warmup_frames = []
+    session_frames = []
+    for sym in universe.symbols():
+        wdf = cache.read(symbol=sym, timeframe=timeframe, start=earliest, end=session_start)
+        sdf = cache.read(symbol=sym, timeframe=timeframe, start=session_start, end=session_end)
+        if len(wdf) > 0:
+            warmup_frames.append(wdf.tail(warmup_bars))
+        if len(sdf) > 0:
+            session_frames.append(sdf)
+
+    if not session_frames:
+        console.print(f"[yellow]No session bars for {session_date}. Try a different date.[/yellow]")
+        sys.exit(1)
+
+    warmup_df = pl.concat(warmup_frames).sort("timestamp") if warmup_frames else pl.DataFrame()
+    session_df = pl.concat(session_frames).sort("timestamp")
+
+    console.print(f"Warmup bars: {len(warmup_df)}  Session bars: {len(session_df)}")
+
+    alerter = TelegramAlerter(
+        bot_token=settings.telegram_bot_token,
+        chat_id=settings.telegram_chat_id,
+    )
+    kill_switch = KillSwitch()
+    heartbeat = Heartbeat(alerter=alerter, alert_every_n_beats=4)
+    portfolio = PortfolioTracker(
+        initial_nav=Decimal(str(settings.paper_starting_capital)),
+        initial_cash=Decimal(str(settings.paper_starting_capital)),
+        start_time=session_start,
+    )
+    journal = JournalStore(db_path=settings.journal_db_path)
+    strategy = TrendFollowingStrategy()
+    risk_rules = load_risk_rules(Path("config/risk_rules.yaml"))
+    risk_manager = RiskManager(rules=risk_rules)
+    executor = PaperExecution()
+
+    loop = DailyLoop(
+        strategy=strategy,
+        risk_manager=risk_manager,
+        executor=executor,
+        portfolio=portfolio,
+        journal=journal,
+        analyst=None,
+        kill_switch=kill_switch,
+        heartbeat=heartbeat,
+        alerter=alerter,
+    )
+
+    result = loop.run(
+        session_date=session_date,
+        warmup_df=warmup_df,
+        session_df=session_df,
+    )
+
+    counter = PaperSessionCounter(path=Path("data/paper_sessions.json"))
+    new_count = counter.increment()
+
+    console.print(f"\n[bold green]Session complete.[/bold green]")
+    console.print(f"Bars processed: {result.bars_processed}")
+    console.print(f"Fills: {len(result.fills)}")
+    console.print(f"Final NAV: ₹{result.final_nav:,.2f}")
+    console.print(f"Daily P&L: ₹{result.daily_pnl:,.2f}")
+    console.print(f"Paper sessions completed: {new_count}/60")
+
+    if counter.is_ready_for_live():
+        console.print("[bold yellow]60 sessions complete — review results before enabling live trading.[/bold yellow]")
