@@ -14,6 +14,7 @@ from agent.data.bar_builder import ClosedBar
 from agent.data.cache import ParquetCache
 from agent.data.universe import UniverseLoader
 from agent.data.upstox_adapter import UpstoxAdapter
+from agent.execution.types import Fill
 from agent.features.pipeline import FeaturePipeline
 from agent.monitoring.alerter import TelegramAlerter
 from agent.monitoring.kill_switch import KillSwitch
@@ -37,6 +38,7 @@ class SessionManager:
         self._bus = bus
         self._session: LiveSession | None = None
         self._task: asyncio.Task[None] | None = None
+        self._background_tasks: set[asyncio.Task[None]] = set()
         self._portfolio: PortfolioTracker | None = None
         self._kill_switch: KillSwitch | None = None
         self._last_bars: dict[str, dict[str, Any]] = {}
@@ -151,7 +153,7 @@ class SessionManager:
         bus = self._bus
         manager = self
 
-        def on_bar_closed(bar: object, fills: list[object]) -> None:
+        def on_bar_closed(bar: object, fills: list[Fill]) -> None:
             assert isinstance(bar, ClosedBar)
 
             # Update last-bar cache
@@ -166,34 +168,38 @@ class SessionManager:
             }
 
             # Publish bar_closed event
-            asyncio.create_task(
+            t = asyncio.create_task(
                 bus.publish({
                     "type": "bar_closed",
                     "ts": bar.bar_open.isoformat(),
                     "data": manager._last_bars[bar.symbol],
                 })
             )
+            manager._background_tasks.add(t)
+            t.add_done_callback(manager._background_tasks.discard)
 
             # Publish fill events — Fill fields: symbol, action, quantity, fill_price, order_id
             for fill in fills:
-                asyncio.create_task(
+                t = asyncio.create_task(
                     bus.publish({
                         "type": "fill",
                         "ts": bar.bar_open.isoformat(),
                         "data": {
-                            "symbol": fill.symbol,  # type: ignore[union-attr]
-                            "action": str(fill.action),  # type: ignore[union-attr]
-                            "quantity": fill.quantity,  # type: ignore[union-attr]
-                            "price": float(fill.fill_price),  # type: ignore[union-attr]
-                            "order_id": fill.order_id,  # type: ignore[union-attr]
+                            "symbol": fill.symbol,
+                            "action": str(fill.action),
+                            "quantity": fill.quantity,
+                            "price": float(fill.fill_price),
+                            "order_id": fill.order_id,
                         },
                     })
                 )
+                manager._background_tasks.add(t)
+                t.add_done_callback(manager._background_tasks.discard)
 
             # Publish portfolio snapshot
             if manager._portfolio is not None:
                 state = manager._portfolio.state
-                asyncio.create_task(
+                t = asyncio.create_task(
                     bus.publish({
                         "type": "portfolio",
                         "ts": bar.bar_open.isoformat(),
@@ -205,6 +211,8 @@ class SessionManager:
                         },
                     })
                 )
+                manager._background_tasks.add(t)
+                t.add_done_callback(manager._background_tasks.discard)
 
         # --- Build session --------------------------------------------
         self._session = LiveSession(
@@ -216,8 +224,6 @@ class SessionManager:
             kill_switch=self._kill_switch,
             on_bar_closed=on_bar_closed,
         )
-
-        adapter = UpstoxAdapter(access_token=settings.upstox_access_token)
 
         async def _run() -> None:
             def on_tick_df(df: pl.DataFrame) -> None:
@@ -244,8 +250,13 @@ class SessionManager:
                 except asyncio.CancelledError:
                     pass
 
-        self._task = asyncio.create_task(_run())
-        self._started_at = datetime.now(tz=IST)
+        try:
+            adapter = UpstoxAdapter(access_token=settings.upstox_access_token)
+            self._task = asyncio.create_task(_run())
+            self._started_at = datetime.now(tz=IST)
+        except Exception:
+            self._session = None
+            raise
 
         await bus.publish({
             "type": "session_started",
@@ -265,7 +276,7 @@ class SessionManager:
         if self._task is not None:
             try:
                 await asyncio.wait_for(asyncio.shield(self._task), timeout=10.0)
-            except (asyncio.TimeoutError, asyncio.CancelledError):
+            except (TimeoutError, asyncio.CancelledError):
                 self._task.cancel()
 
         self._session = None
