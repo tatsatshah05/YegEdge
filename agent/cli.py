@@ -495,3 +495,135 @@ def backtest(symbol: str, timeframe: str, start_str: str, end_str: str, warmup: 
                 f"₹{s.final_nav:,.2f}",
             )
         console.print(detail)
+
+
+# ---------------------------------------------------------------------------
+# live-paper command
+# ---------------------------------------------------------------------------
+
+
+@cli.command("live-paper")
+@click.option(
+    "--timeframe",
+    default="60m",
+    type=click.Choice(["15m", "60m"]),
+    show_default=True,
+    help="Bar timeframe for live aggregation.",
+)
+@click.option(
+    "--warmup-bars",
+    default=100,
+    show_default=True,
+    help="Number of historical bars to prepend for indicator warm-up.",
+)
+def live_paper(timeframe: str, warmup_bars: int) -> None:
+    """Paper-trade in real time using live Upstox WebSocket ticks."""
+    import asyncio
+    from decimal import Decimal
+
+    import polars as pl
+
+    from agent.data.cache import ParquetCache
+    from agent.data.universe import UniverseLoader
+    from agent.data.upstox_adapter import UpstoxAdapter
+    from agent.features.pipeline import FeaturePipeline
+    from agent.monitoring.alerter import TelegramAlerter
+    from agent.monitoring.kill_switch import KillSwitch
+    from agent.portfolio.tracker import PortfolioTracker
+    from agent.runner.live_session import LiveSession
+
+    settings = AppSettings()
+
+    if not settings.upstox_access_token:
+        console.print("[red]UPSTOX_ACCESS_TOKEN not set. Run your daily login first.[/red]")
+        sys.exit(1)
+
+    cache = ParquetCache(root=settings.parquet_cache_dir)
+    report = cache.coverage_report()
+
+    if not report:
+        console.print("[red]No cached data found. Run `refresh` first to load warmup bars.[/red]")
+        sys.exit(1)
+
+    universe = UniverseLoader(Path("config/universe.yaml"))
+    symbols = universe.symbols()
+
+    today = datetime.now(tz=IST).date()
+    session_start = datetime(today.year, today.month, today.day, 9, 15, tzinfo=IST)
+
+    pipeline = FeaturePipeline()
+    warmup_frames: list[pl.DataFrame] = []
+    for sym in symbols:
+        if sym not in report or timeframe not in report.get(sym, {}):
+            continue
+        sym_earliest, _ = report[sym][timeframe]
+        all_sym = cache.read(symbol=sym, timeframe=timeframe, start=sym_earliest, end=session_start)
+        if len(all_sym) == 0:
+            continue
+        enriched = pipeline.run(all_sym)
+        warmup_frames.append(enriched.tail(warmup_bars))
+
+    warmup_df = pl.concat(warmup_frames) if warmup_frames else pl.DataFrame()
+
+    portfolio = PortfolioTracker(
+        initial_nav=Decimal(str(settings.paper_starting_capital)),
+        initial_cash=Decimal(str(settings.paper_starting_capital)),
+        start_time=session_start,
+    )
+
+    alerter = TelegramAlerter(
+        bot_token=settings.telegram_bot_token,
+        chat_id=settings.telegram_chat_id,
+    )
+
+    kill_switch = KillSwitch(flag_path=Path("./data/.kill_switch"))
+
+    live_session = LiveSession(
+        symbols=symbols,
+        timeframe=timeframe,
+        portfolio=portfolio,
+        warmup_df=warmup_df,
+        alerter=alerter,
+        kill_switch=kill_switch,
+    )
+
+    adapter = UpstoxAdapter(access_token=settings.upstox_access_token)
+
+    def on_tick_df(df: pl.DataFrame) -> None:
+        if len(df) == 0:
+            return
+        sym = str(df["symbol"][0])
+        ltp = float(df["ltp"][0])
+        ts = df["timestamp"][0]
+        if hasattr(ts, "tzinfo") and ts.tzinfo is None:
+            ts = ts.replace(tzinfo=IST)
+        live_session.put_tick(sym, ltp, ts)
+
+    async def _run() -> None:
+        stream_task = asyncio.create_task(adapter.stream_live(symbols, callback=on_tick_df))
+        session_task = asyncio.create_task(live_session.run())
+        await session_task
+        stream_task.cancel()
+        try:
+            await stream_task
+        except asyncio.CancelledError:
+            pass
+
+    console.print(
+        f"[bold green]Starting live paper trading session[/bold green] "
+        f"({timeframe} bars, {len(symbols)} symbols)"
+    )
+    console.print("[dim]Press Ctrl+C to stop early.[/dim]")
+
+    try:
+        asyncio.run(_run())
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Session interrupted by user.[/yellow]")
+
+    final_state = portfolio.state
+    console.print(
+        f"\n[bold]Session complete.[/bold] "
+        f"NAV: ₹{final_state.nav:,.0f} | "
+        f"P&L: ₹{final_state.daily_pnl:,.0f} | "
+        f"Orders: {final_state.orders_today}"
+    )
