@@ -51,6 +51,7 @@ def test_15m_bar_closes_at_15_minute_boundary() -> None:
     assert closed is not None
     assert closed.bar_open == ts(9, 15)
     assert closed.tick_count == 2
+    assert closed.close == 3510.0
 
 
 def test_force_close_returns_current_bar() -> None:
@@ -100,3 +101,15 @@ def test_tick_before_market_open_snaps_to_market_open_slot() -> None:
     closed = bb.on_tick(505.0, ts(10, 16))
     assert closed is not None
     assert closed.bar_open == ts(9, 15)
+
+
+def test_on_tick_after_force_close_starts_fresh_bar() -> None:
+    bb = BarBuilder("HDFCBANK", "60m")
+    bb.on_tick(1700.0, ts(9, 15))
+    bb.force_close()
+    # _current_slot must not be stale after force_close
+    result = bb.on_tick(1710.0, ts(9, 15))
+    assert result is None  # starts a new bar, does not blow up
+    closed = bb.on_tick(1720.0, ts(10, 15))
+    assert closed is not None
+    assert closed.open == 1710.0

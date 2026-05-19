@@ -144,4 +144,5 @@ class BarBuilder:
         self._low = None
         self._close = None
         self._tick_count = 0
+        self._current_slot = None
         return bar
