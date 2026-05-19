@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import tempfile
+from collections.abc import Callable
 from datetime import datetime, time
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -49,6 +50,7 @@ class LiveSession:
         kill_switch: KillSwitch | None = None,
         alerter: TelegramAlerter | None = None,
         heartbeat: Heartbeat | None = None,
+        on_bar_closed: Callable[[object, list[object]], None] | None = None,
     ) -> None:
         self._symbols = symbols
         self._timeframe = timeframe
@@ -61,17 +63,21 @@ class LiveSession:
         self._queue: asyncio.Queue[tuple[str, float, datetime]] = asyncio.Queue()
         self._loop = self._make_daily_loop(portfolio, alerter, heartbeat, kill_switch)
         self._kill_switch = kill_switch
+        self._event_loop: asyncio.AbstractEventLoop | None = None
+        self._on_bar_closed_cb = on_bar_closed
 
     def put_tick(self, symbol: str, ltp: float, ts: datetime) -> None:
         """Thread-safe. Called from WebSocket callback thread."""
-        loop = asyncio.get_event_loop()
+        if self._event_loop is None:
+            raise RuntimeError("LiveSession.run() must be awaited before put_tick() is called")
         asyncio.run_coroutine_threadsafe(
             self._queue.put((symbol, ltp, ts)),
-            loop,
+            self._event_loop,
         )
 
     async def run(self) -> None:
         """Main async loop. Processes ticks until 15:30 IST or kill switch."""
+        self._event_loop = asyncio.get_running_loop()
         logger.info("live_session.start", symbols=self._symbols, timeframe=self._timeframe)
         while True:
             try:
@@ -131,7 +137,9 @@ class LiveSession:
             return
 
         enriched = self._pipeline.run(raw_window)
-        self._loop.process_bar(enriched, evaluation_time=bar.bar_open)
+        fills = self._loop.process_bar(enriched, evaluation_time=bar.bar_open)
+        if self._on_bar_closed_cb is not None:
+            self._on_bar_closed_cb(bar, fills)
 
     def _is_within_session(self, ts: datetime) -> bool:
         ist = ts.astimezone(IST)

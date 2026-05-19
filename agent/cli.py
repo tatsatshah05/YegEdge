@@ -519,13 +519,20 @@ def backtest(symbol: str, timeframe: str, start_str: str, end_str: str, warmup: 
 def live_paper(timeframe: str, warmup_bars: int) -> None:
     """Paper-trade in real time using live Upstox WebSocket ticks."""
     import asyncio
+    import threading
     from decimal import Decimal
 
     import polars as pl
+    from rich.layout import Layout
+    from rich.live import Live
+    from rich.panel import Panel
+    from rich.text import Text
 
+    from agent.data.bar_builder import ClosedBar
     from agent.data.cache import ParquetCache
     from agent.data.universe import UniverseLoader
     from agent.data.upstox_adapter import UpstoxAdapter
+    from agent.execution.types import Fill
     from agent.features.pipeline import FeaturePipeline
     from agent.monitoring.alerter import TelegramAlerter
     from agent.monitoring.kill_switch import KillSwitch
@@ -578,6 +585,107 @@ def live_paper(timeframe: str, warmup_bars: int) -> None:
 
     kill_switch = KillSwitch(flag_path=Path("./data/.kill_switch"))
 
+    # --- Live display state (mutated from async callback, read by Rich renderer) ---
+    _display_lock = threading.Lock()
+    # Each entry: (symbol, bar_open_str, open, high, low, close, tick_count)
+    _last_bars: list[tuple[str, str, float, float, float, float, int]] = []
+    _event_log: list[str] = []  # most recent events, newest first
+    _bars_processed = 0
+
+    def _build_display() -> Layout:
+        with _display_lock:
+            state = portfolio.state
+            pnl_color = "green" if state.daily_pnl >= 0 else "red"
+            now_ist = datetime.now(tz=IST).strftime("%H:%M:%S IST")
+
+            header = Text.assemble(
+                ("YegEdge  ", "bold cyan"),
+                (f"{timeframe} bars  ", "dim"),
+                (f"{len(symbols)} symbols  ", "dim"),
+                (now_ist, "bold"),
+            )
+
+            nav_text = Text.assemble(
+                ("NAV  ", "dim"),
+                (f"₹{state.nav:,.0f}   ", "bold"),
+                ("P&L  ", "dim"),
+                (f"₹{state.daily_pnl:+,.0f}   ", f"bold {pnl_color}"),
+                ("Cash  ", "dim"),
+                (f"₹{state.cash:,.0f}   ", "bold"),
+                ("Orders  ", "dim"),
+                (f"{state.orders_today}   ", "bold"),
+                ("Bars  ", "dim"),
+                (str(_bars_processed), "bold"),
+            )
+
+            bars_table = Table(show_header=True, header_style="bold blue", box=None, padding=(0, 1))
+            bars_table.add_column("Symbol", width=12)
+            bars_table.add_column("Bar open", width=8)
+            bars_table.add_column("O", justify="right", width=8)
+            bars_table.add_column("H", justify="right", width=8)
+            bars_table.add_column("L", justify="right", width=8)
+            bars_table.add_column("C", justify="right", width=8)
+            bars_table.add_column("Ticks", justify="right", width=6)
+            for sym, bar_ts, o, h, lo, c, ticks in _last_bars[-10:]:
+                bars_table.add_row(
+                    sym,
+                    bar_ts,
+                    f"{o:.2f}",
+                    f"{h:.2f}",
+                    f"{lo:.2f}",
+                    f"{c:.2f}",
+                    str(ticks),
+                )
+
+            events_text = Text()
+            for line in _event_log[:12]:
+                events_text.append(line + "\n")
+
+            layout = Layout()
+            layout.split_column(
+                Layout(Panel(header, style="on grey11"), size=3),
+                Layout(Panel(nav_text, title="Portfolio", border_style="cyan"), size=4),
+                Layout(Panel(bars_table, title="Last closed bars", border_style="blue"), size=14),
+                Layout(Panel(events_text, title="Events", border_style="yellow")),
+            )
+        return layout
+
+    def on_bar_closed(bar: object, fills: list[object]) -> None:
+        nonlocal _bars_processed
+        assert isinstance(bar, ClosedBar)
+        with _display_lock:
+            _bars_processed += 1
+            _last_bars.append(
+                (
+                    bar.symbol,
+                    bar.bar_open.strftime("%H:%M"),
+                    bar.open,
+                    bar.high,
+                    bar.low,
+                    bar.close,
+                    bar.tick_count,
+                )
+            )
+            if len(_last_bars) > 20:
+                _last_bars.pop(0)
+
+            for fill in fills:
+                assert isinstance(fill, Fill)
+                _event_log.insert(
+                    0,
+                    f"[green]FILL[/green]  {fill.symbol}  {fill.action}  "
+                    f"qty={fill.quantity}  @₹{fill.fill_price:.2f}  "
+                    f"{bar.bar_open.strftime('%H:%M')}",
+                )
+            if not fills:
+                _event_log.insert(
+                    0,
+                    f"[dim]BAR[/dim]   {bar.symbol}  C={bar.close:.2f}  "
+                    f"ticks={bar.tick_count}  {bar.bar_open.strftime('%H:%M')}",
+                )
+            if len(_event_log) > 50:
+                _event_log.pop()
+
     live_session = LiveSession(
         symbols=symbols,
         timeframe=timeframe,
@@ -585,6 +693,7 @@ def live_paper(timeframe: str, warmup_bars: int) -> None:
         warmup_df=warmup_df,
         alerter=alerter,
         kill_switch=kill_switch,
+        on_bar_closed=on_bar_closed,
     )
 
     adapter = UpstoxAdapter(access_token=settings.upstox_access_token)
@@ -609,21 +718,35 @@ def live_paper(timeframe: str, warmup_bars: int) -> None:
         except asyncio.CancelledError:
             pass
 
-    console.print(
-        f"[bold green]Starting live paper trading session[/bold green] "
-        f"({timeframe} bars, {len(symbols)} symbols)"
-    )
-    console.print("[dim]Press Ctrl+C to stop early.[/dim]")
-
     try:
-        asyncio.run(_run())
+        with Live(_build_display(), refresh_per_second=2, screen=True) as live:
+
+            async def _run_with_refresh() -> None:
+                stream_task = asyncio.create_task(adapter.stream_live(symbols, callback=on_tick_df))
+                session_task = asyncio.create_task(live_session.run())
+
+                async def _refresh_loop() -> None:
+                    while not session_task.done():
+                        live.update(_build_display())
+                        await asyncio.sleep(0.5)
+                    live.update(_build_display())
+
+                refresh_task = asyncio.create_task(_refresh_loop())
+                await session_task
+                stream_task.cancel()
+                refresh_task.cancel()
+                await asyncio.gather(stream_task, refresh_task, return_exceptions=True)
+
+            asyncio.run(_run_with_refresh())
     except KeyboardInterrupt:
         console.print("\n[yellow]Session interrupted by user.[/yellow]")
 
     final_state = portfolio.state
+    pnl_sign = "+" if final_state.daily_pnl >= 0 else ""
     console.print(
         f"\n[bold]Session complete.[/bold] "
         f"NAV: ₹{final_state.nav:,.0f} | "
-        f"P&L: ₹{final_state.daily_pnl:,.0f} | "
-        f"Orders: {final_state.orders_today}"
+        f"P&L: {pnl_sign}₹{final_state.daily_pnl:,.0f} | "
+        f"Orders: {final_state.orders_today} | "
+        f"Bars processed: {_bars_processed}"
     )
