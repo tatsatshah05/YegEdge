@@ -5,6 +5,7 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import structlog
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
@@ -95,7 +96,7 @@ async def websocket_events(ws: WebSocket) -> None:
             json.dumps(
                 {
                     "type": "snapshot",
-                    "ts": datetime.utcnow().isoformat(),
+                    "ts": datetime.now(ZoneInfo("Asia/Kolkata")).isoformat(),
                     "data": {
                         "status": _manager.status(),
                         "portfolio": _manager.portfolio_state,
