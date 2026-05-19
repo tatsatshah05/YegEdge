@@ -80,3 +80,9 @@ logs/
 .envrc
 node_modules/
 .cache/
+
+# --- Next.js ---
+.next/
+tsconfig.tsbuildinfo
+# frontend/lib is Next.js source, not a Python build artifact
+!frontend/lib/
