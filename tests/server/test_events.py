@@ -27,8 +27,7 @@ async def test_publish_broadcasts_to_multiple_subscribers() -> None:
     assert e1["type"] == e2["type"] == "broadcast"
 
 
-@pytest.mark.asyncio
-async def test_unsubscribe_removes_queue() -> None:
+def test_unsubscribe_removes_queue() -> None:
     bus = EventBus()
     q = bus.subscribe()
     assert bus.subscriber_count == 1

@@ -8,7 +8,8 @@ class EventBus:
     """Broadcast queue: publish() fans out one event to every subscribed queue.
 
     Each WebSocket connection subscribes to get its own queue; dead/full queues
-    are dropped silently on the next publish.
+    are dropped silently on the next publish. Not thread-safe: all callers must run
+    on the same asyncio event loop.
     """
 
     def __init__(self) -> None:
