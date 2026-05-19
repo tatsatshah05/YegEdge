@@ -154,7 +154,8 @@ class SessionManager:
         manager = self
 
         def on_bar_closed(bar: object, fills: list[Fill]) -> None:
-            assert isinstance(bar, ClosedBar)
+            if not isinstance(bar, ClosedBar):
+                raise TypeError(f"Expected ClosedBar, got {type(bar)}")
 
             # Update last-bar cache
             manager._last_bars[bar.symbol] = {
@@ -225,6 +226,12 @@ class SessionManager:
             on_bar_closed=on_bar_closed,
         )
 
+        try:
+            adapter = UpstoxAdapter(access_token=settings.upstox_access_token)
+        except Exception:
+            self._session = None
+            raise
+
         async def _run() -> None:
             def on_tick_df(df: pl.DataFrame) -> None:
                 if len(df) == 0:
@@ -250,13 +257,8 @@ class SessionManager:
                 except asyncio.CancelledError:
                     pass
 
-        try:
-            adapter = UpstoxAdapter(access_token=settings.upstox_access_token)
-            self._task = asyncio.create_task(_run())
-            self._started_at = datetime.now(tz=IST)
-        except Exception:
-            self._session = None
-            raise
+        self._task = asyncio.create_task(_run())
+        self._started_at = datetime.now(tz=IST)
 
         await bus.publish({
             "type": "session_started",
