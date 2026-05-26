@@ -65,7 +65,7 @@ class StartRequest(BaseModel):
 @app.post("/api/session/start")
 async def start_session(req: StartRequest) -> dict[str, Any]:
     settings = AppSettings()
-    if not settings.upstox_access_token:
+    if settings.broker != "yfinance" and not settings.upstox_access_token:
         raise HTTPException(status_code=400, detail="UPSTOX_ACCESS_TOKEN not configured")
 
     if _manager.is_running:
