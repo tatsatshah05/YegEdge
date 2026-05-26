@@ -52,7 +52,6 @@ symbols:
   # Auto
   - MARUTI
   - M&M
-  - TATAMOTORS
   - BAJAJ-AUTO
 
   # Metals
@@ -102,7 +101,6 @@ sectors:
   BRITANNIA: fmcg
   MARUTI: auto
   M&M: auto
-  TATAMOTORS: auto
   BAJAJ-AUTO: auto
   TATASTEEL: metals
   JSWSTEEL: metals

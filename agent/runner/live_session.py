@@ -79,6 +79,13 @@ class LiveSession:
         """Main async loop. Processes ticks until 15:30 IST or kill switch."""
         self._event_loop = asyncio.get_running_loop()
         logger.info("live_session.start", symbols=self._symbols, timeframe=self._timeframe)
+        try:
+            await self._run_loop()
+        except Exception:
+            logger.exception("live_session.crashed")
+            raise
+
+    async def _run_loop(self) -> None:
         while True:
             try:
                 symbol, ltp, ts = await asyncio.wait_for(self._queue.get(), timeout=5.0)
@@ -88,15 +95,19 @@ class LiveSession:
                 continue
 
             if not self._is_within_session(ts):
+                logger.info("live_session.outside_session", ts=str(ts))
                 break
 
             if self._kill_switch and self._kill_switch.is_active():
                 logger.warning("live_session.kill_switch_active")
                 break
 
-            closed = self._on_tick(symbol, ltp, ts)
-            if closed is not None:
-                self._on_bar_closed(closed)
+            try:
+                closed = self._on_tick(symbol, ltp, ts)
+                if closed is not None:
+                    self._on_bar_closed(closed)
+            except Exception:
+                logger.exception("live_session.tick_error", symbol=symbol, ltp=ltp)
 
         # Force-close all in-progress bars at session end
         for sym in self._symbols:
