@@ -13,7 +13,6 @@ import structlog
 from agent.data.bar_builder import ClosedBar
 from agent.data.cache import ParquetCache
 from agent.data.universe import UniverseLoader
-from agent.data.upstox_adapter import UpstoxAdapter
 from agent.data.yfinance_adapter import YFinanceAdapter
 from agent.execution.types import Fill
 from agent.features.pipeline import FeaturePipeline
@@ -228,7 +227,7 @@ class SessionManager:
         )
 
         if settings.broker == "yfinance":
-            adapter: UpstoxAdapter | YFinanceAdapter = YFinanceAdapter()
+            adapter: YFinanceAdapter = YFinanceAdapter()
             logger.info("session_manager.adapter", broker="yfinance")
         else:
             if not settings.upstox_access_token:
@@ -236,6 +235,7 @@ class SessionManager:
                 raise RuntimeError(
                     "UPSTOX_ACCESS_TOKEN is not set. Run daily login or set BROKER=yfinance."
                 )
+            from agent.data.upstox_adapter import UpstoxAdapter
             adapter = UpstoxAdapter(access_token=settings.upstox_access_token)
             logger.info("session_manager.adapter", broker="upstox")
 
