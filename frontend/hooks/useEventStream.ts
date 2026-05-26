@@ -81,10 +81,13 @@ export function useEventStream() {
         }
 
         if (ev.type === "session_started") {
+          const d = ev.data as { timeframe?: string; symbols?: string[] };
           next.status = {
             ...prev.status,
             running: true,
             started_at: ev.ts,
+            ...(d.timeframe && { timeframe: d.timeframe }),
+            ...(d.symbols && { symbols_count: d.symbols.length }),
           };
         }
 
