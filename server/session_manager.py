@@ -14,6 +14,7 @@ from agent.data.bar_builder import ClosedBar
 from agent.data.cache import ParquetCache
 from agent.data.universe import UniverseLoader
 from agent.data.upstox_adapter import UpstoxAdapter
+from agent.data.yfinance_adapter import YFinanceAdapter
 from agent.execution.types import Fill
 from agent.features.pipeline import FeaturePipeline
 from agent.monitoring.alerter import TelegramAlerter
@@ -226,11 +227,17 @@ class SessionManager:
             on_bar_closed=on_bar_closed,
         )
 
-        try:
+        if settings.broker == "yfinance":
+            adapter: UpstoxAdapter | YFinanceAdapter = YFinanceAdapter()
+            logger.info("session_manager.adapter", broker="yfinance")
+        else:
+            if not settings.upstox_access_token:
+                self._session = None
+                raise RuntimeError(
+                    "UPSTOX_ACCESS_TOKEN is not set. Run daily login or set BROKER=yfinance."
+                )
             adapter = UpstoxAdapter(access_token=settings.upstox_access_token)
-        except Exception:
-            self._session = None
-            raise
+            logger.info("session_manager.adapter", broker="upstox")
 
         async def _run() -> None:
             def on_tick_df(df: pl.DataFrame) -> None:

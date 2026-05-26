@@ -51,21 +51,28 @@ def cli() -> None:
     help="Ignore existing cache; fetch full history from scratch.",
 )
 def refresh(symbol: str | None, timeframe: str | None, full: bool) -> None:
-    """Fetch and cache historical OHLCV bars from Upstox."""
+    """Fetch and cache historical OHLCV bars (yfinance or Upstox)."""
     settings = AppSettings()
 
-    if not settings.upstox_access_token:
-        console.print("[red]Error: UPSTOX_ACCESS_TOKEN is not set. Cannot connect to broker.[/red]")
-        sys.exit(1)
-
-    # Import here to avoid circular issues and heavy imports at module level
     from agent.data.cache import ParquetCache
     from agent.data.universe import UniverseLoader
-    from agent.data.upstox_adapter import UpstoxAdapter
     from agent.data.validator import DataValidator
 
     universe = UniverseLoader(Path("config/universe.yaml"))
-    adapter = UpstoxAdapter(access_token=settings.upstox_access_token)
+
+    if settings.broker == "yfinance":
+        from agent.data.yfinance_adapter import YFinanceAdapter
+        adapter: object = YFinanceAdapter()
+        console.print("[cyan]Using yfinance — ~15 min delayed NSE data, no API key required[/cyan]")
+    else:
+        if not settings.upstox_access_token:
+            console.print(
+                "[red]Error: UPSTOX_ACCESS_TOKEN is not set. "
+                "Run daily login or set BROKER=yfinance in .env.[/red]"
+            )
+            sys.exit(1)
+        from agent.data.upstox_adapter import UpstoxAdapter
+        adapter = UpstoxAdapter(access_token=settings.upstox_access_token)
     cache = ParquetCache(root=settings.parquet_cache_dir)
     validator = DataValidator()
 
@@ -531,7 +538,6 @@ def live_paper(timeframe: str, warmup_bars: int) -> None:
     from agent.data.bar_builder import ClosedBar
     from agent.data.cache import ParquetCache
     from agent.data.universe import UniverseLoader
-    from agent.data.upstox_adapter import UpstoxAdapter
     from agent.execution.types import Fill
     from agent.features.pipeline import FeaturePipeline
     from agent.monitoring.alerter import TelegramAlerter
@@ -540,10 +546,6 @@ def live_paper(timeframe: str, warmup_bars: int) -> None:
     from agent.runner.live_session import LiveSession
 
     settings = AppSettings()
-
-    if not settings.upstox_access_token:
-        console.print("[red]UPSTOX_ACCESS_TOKEN not set. Run your daily login first.[/red]")
-        sys.exit(1)
 
     cache = ParquetCache(root=settings.parquet_cache_dir)
     report = cache.coverage_report()
@@ -696,7 +698,16 @@ def live_paper(timeframe: str, warmup_bars: int) -> None:
         on_bar_closed=on_bar_closed,
     )
 
-    adapter = UpstoxAdapter(access_token=settings.upstox_access_token)
+    if settings.broker == "yfinance":
+        from agent.data.yfinance_adapter import YFinanceAdapter
+        adapter: object = YFinanceAdapter()
+        console.print("[cyan]Live stream: yfinance polling (60s interval, ~15 min delayed)[/cyan]")
+    else:
+        if not settings.upstox_access_token:
+            console.print("[red]UPSTOX_ACCESS_TOKEN not set. Run daily login or set BROKER=yfinance.[/red]")
+            sys.exit(1)
+        from agent.data.upstox_adapter import UpstoxAdapter
+        adapter = UpstoxAdapter(access_token=settings.upstox_access_token)
 
     def on_tick_df(df: pl.DataFrame) -> None:
         if len(df) == 0:

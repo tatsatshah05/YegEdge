@@ -35,8 +35,8 @@ class AppSettings(BaseSettings):
     parquet_cache_dir: Path = Path("./data/cache")
     journal_db_path: Path = Path("./data/journal.db")
 
-    # Broker — Upstox
-    broker: str = "upstox"
+    # Broker — set to "yfinance" for no-auth paper trading, "upstox" for live
+    broker: str = "yfinance"
     upstox_api_key: str = ""
     upstox_api_secret: str = ""
     upstox_access_token: str = ""
