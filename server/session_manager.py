@@ -15,7 +15,6 @@ from agent.data.cache import ParquetCache
 from agent.data.universe import UniverseLoader
 from agent.data.yfinance_adapter import YFinanceAdapter
 from agent.execution.types import Fill
-from agent.features.pipeline import FeaturePipeline
 from agent.monitoring.alerter import TelegramAlerter
 from agent.monitoring.kill_switch import KillSwitch
 from agent.portfolio.tracker import PortfolioTracker
@@ -115,7 +114,6 @@ class SessionManager:
         self._symbols = symbols
         self._timeframe = timeframe
 
-        pipeline = FeaturePipeline()
         warmup_frames: list[pl.DataFrame] = []
         for sym in symbols:
             if sym not in report or timeframe not in report.get(sym, {}):
@@ -126,8 +124,7 @@ class SessionManager:
             )
             if len(all_sym) == 0:
                 continue
-            enriched = pipeline.run(all_sym)
-            warmup_frames.append(enriched.tail(warmup_bars))
+            warmup_frames.append(all_sym.tail(warmup_bars))
 
         warmup_df = pl.concat(warmup_frames) if warmup_frames else pl.DataFrame()
 
