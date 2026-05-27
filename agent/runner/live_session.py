@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import tempfile
 from collections.abc import Callable
 from datetime import datetime, time
 from pathlib import Path
@@ -167,14 +166,15 @@ class LiveSession:
         heartbeat: Heartbeat | None,
         kill_switch: KillSwitch | None,
     ) -> DailyLoop:
-        _tmp = Path(tempfile.mkdtemp())
+        journal_path = Path("./data/journal.db")
+        journal_path.parent.mkdir(parents=True, exist_ok=True)
         strategy = TrendFollowingStrategy()
         risk_manager = RiskManager(rules=load_risk_rules())
         executor = PaperExecution()
-        journal = JournalStore(db_path=_tmp / "live_journal.db")
+        journal = JournalStore(db_path=journal_path)
         _alerter = alerter or TelegramAlerter("", "")
         _heartbeat = heartbeat or Heartbeat(alerter=None)
-        _kill_switch = kill_switch or KillSwitch(flag_path=_tmp / ".kill_switch")
+        _kill_switch = kill_switch or KillSwitch(flag_path=Path("./data/.kill_switch"))
 
         return DailyLoop(
             strategy=strategy,
