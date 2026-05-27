@@ -331,7 +331,16 @@ class UpstoxAdapter(BrokerAdapter):
             Callable invoked for every valid tick.  Receives a one-row DataFrame
             with columns: symbol (Utf8), ltp (Float64), timestamp (Datetime[us, Asia/Kolkata]).
         """
-        instrument_keys = [self._symbol_to_instrument_key(s) for s in symbols]
+        instrument_keys: list[str] = []
+        for s in symbols:
+            try:
+                instrument_keys.append(self._symbol_to_instrument_key(s))
+            except KeyError:
+                logger.warning("upstox_adapter.stream_live.symbol_skipped", symbol=s)
+
+        if not instrument_keys:
+            logger.error("upstox_adapter.stream_live.no_valid_symbols")
+            return
 
         config = upstox_client.Configuration()
         config.access_token = self._access_token

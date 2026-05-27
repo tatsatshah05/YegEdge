@@ -251,6 +251,16 @@ class SessionManager:
             stream_task = asyncio.create_task(
                 adapter.stream_live(symbols, callback=on_tick_df)
             )
+
+            def _log_stream_error(t: asyncio.Task[None]) -> None:
+                if not t.cancelled() and t.exception() is not None:
+                    logger.error(
+                        "session_manager.stream_task_failed",
+                        error=str(t.exception()),
+                        exc_info=t.exception(),
+                    )
+
+            stream_task.add_done_callback(_log_stream_error)
             try:
                 if manager._session is not None:
                     await manager._session.run()
