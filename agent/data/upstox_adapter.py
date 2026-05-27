@@ -353,19 +353,29 @@ class UpstoxAdapter(BrokerAdapter):
         )
 
         streamer.on("message", lambda msg: self._handle_tick(msg, callback=callback))
+        streamer.on("error", lambda err: logger.error(
+            "upstox_adapter.stream_live.ws_error", error=str(err)
+        ))
+        streamer.on("close", lambda: logger.warning(
+            "upstox_adapter.stream_live.ws_close"
+        ))
 
         logger.info(
             "upstox_adapter.stream_live.connecting",
-            symbols=symbols,
-            instrument_keys=instrument_keys,
+            instrument_count=len(instrument_keys),
         )
 
-        # streamer.connect() is synchronous and blocks until disconnected.
-        # Wrap in run_in_executor so it doesn't block the asyncio event loop.
+        # connect() in this SDK version is non-blocking — it starts the WebSocket
+        # in a background thread and returns immediately. Ticks still arrive via
+        # the "message" callback. We park in run_in_executor so the coroutine
+        # stays alive (and cancellable) for the duration of the session.
         loop = asyncio.get_running_loop()
         await loop.run_in_executor(None, streamer.connect)
 
-        logger.info("upstox_adapter.stream_live.disconnected", symbols=symbols)
+        logger.info("upstox_adapter.stream_live.connect_returned")
+
+    # Counter to limit raw-message debug dumps to the first few ticks only.
+    _raw_log_count: int = 0
 
     def _handle_tick(
         self,
@@ -381,6 +391,16 @@ class UpstoxAdapter(BrokerAdapter):
         Errors in individual feed entries are caught and logged so a single
         bad tick never crashes the stream.
         """
+        # Dump the first 3 raw messages so we can diagnose format issues.
+        if self._raw_log_count < 3:
+            logger.info(
+                "upstox_adapter.handle_tick.raw_msg",
+                msg_keys=list(msg.keys()),
+                feeds_count=len(msg.get("feeds", {})),
+                sample=str(msg)[:400],
+            )
+            self._raw_log_count += 1
+
         for instrument_key, feed_data in msg.get("feeds", {}).items():
             try:
                 try:
@@ -392,25 +412,52 @@ class UpstoxAdapter(BrokerAdapter):
                     )
                     continue
 
-                ltp_data = feed_data.get("ltpc")
+                # Try top-level "ltpc" first, then nested paths used by some
+                # SDK versions: ff.marketFF.ltpc  /  ff.indexFF.ltpc
+                ltp_data = (
+                    feed_data.get("ltpc")
+                    or feed_data.get("ff", {}).get("marketFF", {}).get("ltpc")
+                    or feed_data.get("ff", {}).get("indexFF", {}).get("ltpc")
+                )
                 if ltp_data is None:
                     logger.debug(
                         "upstox_adapter.handle_tick.no_ltpc",
-                        instrument_key=instrument_key,
+                        symbol=symbol,
+                        feed_keys=list(feed_data.keys()),
                     )
                     continue
 
-                if "ltt" not in ltp_data or "ltp" not in ltp_data:
+                # Protobuf strips zero-value fields from the decoded dict.
+                # Accept any numeric key alias Upstox SDK might use.
+                ltp_raw = (
+                    ltp_data.get("ltp")
+                    or ltp_data.get("LTP")
+                    or ltp_data.get("last_price")
+                )
+                ltt_raw = (
+                    ltp_data.get("ltt")
+                    or ltp_data.get("LTT")
+                    or ltp_data.get("last_trade_time")
+                )
+
+                if not ltp_raw or not ltt_raw:
                     logger.debug(
                         "upstox_adapter.handle_tick.incomplete_ltpc",
                         symbol=symbol,
                         keys=list(ltp_data.keys()),
+                        ltp_raw=ltp_raw,
+                        ltt_raw=ltt_raw,
                     )
                     continue
 
-                # ltt is epoch ms as a string (e.g. "1704168600000")
-                ltp = float(ltp_data["ltp"])
-                ts = datetime.fromtimestamp(int(ltp_data["ltt"]) / 1000, tz=IST)
+                ltp = float(ltp_raw)
+                ts = datetime.fromtimestamp(int(ltt_raw) / 1000, tz=IST)
+
+                logger.debug(
+                    "upstox_adapter.handle_tick.tick",
+                    symbol=symbol,
+                    ltp=ltp,
+                )
 
                 row_df = pl.DataFrame(
                     {
