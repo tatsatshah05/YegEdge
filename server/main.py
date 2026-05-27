@@ -58,26 +58,38 @@ async def get_market_data() -> dict[str, Any]:
 
 
 class StartRequest(BaseModel):
-    timeframe: str = "60m"
+    timeframe: str = "5m"
     warmup_bars: int = 100
+    exchange: str = "NSE"
 
 
 @app.post("/api/session/start")
 async def start_session(req: StartRequest) -> dict[str, Any]:
     settings = AppSettings()
-    if settings.broker != "yfinance" and not settings.upstox_access_token:
-        raise HTTPException(status_code=400, detail="UPSTOX_ACCESS_TOKEN not configured")
+
+    if req.exchange not in ("NSE", "NYSE"):
+        raise HTTPException(status_code=400, detail=f"Unknown exchange: {req.exchange!r}. Use NSE or NYSE.")
+
+    if req.exchange == "NSE" and settings.broker not in ("yfinance",) and not settings.upstox_access_token:
+        raise HTTPException(status_code=400, detail="UPSTOX_ACCESS_TOKEN not configured for NSE")
+
+    if req.exchange == "NYSE" and not settings.finnhub_api_key and not settings.alpaca_api_key:
+        raise HTTPException(status_code=400, detail="No NYSE data source configured. Set FINNHUB_API_KEY in .env.")
 
     if _manager.is_running:
         raise HTTPException(status_code=409, detail="Session already running")
 
     try:
-        await _manager.start(timeframe=req.timeframe, warmup_bars=req.warmup_bars)
+        await _manager.start(
+            timeframe=req.timeframe,
+            warmup_bars=req.warmup_bars,
+            exchange=req.exchange,
+        )
     except Exception as exc:
         logger.error("server.start_session.error", error=str(exc))
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-    return {"status": "started", "timeframe": req.timeframe}
+    return {"status": "started", "timeframe": req.timeframe, "exchange": req.exchange}
 
 
 @app.post("/api/session/stop")

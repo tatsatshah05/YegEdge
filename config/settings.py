@@ -35,12 +35,20 @@ class AppSettings(BaseSettings):
     parquet_cache_dir: Path = Path("./data/cache")
     journal_db_path: Path = Path("./data/journal.db")
 
-    # Broker — set to "yfinance" for no-auth paper trading, "upstox" for live
+    # Broker — set to "yfinance" for no-auth paper trading, "upstox" for live NSE
     broker: str = "yfinance"
     upstox_api_key: str = ""
     upstox_api_secret: str = ""
     upstox_access_token: str = ""
     upstox_redirect_uri: str = "http://localhost:3000"
+
+    # Alpaca — paper trading for NYSE (LIVE_TRADING_ENABLED must remain False)
+    alpaca_api_key: str = ""
+    alpaca_api_secret: str = ""
+    alpaca_base_url: str = "https://paper-api.alpaca.markets"
+
+    # Finnhub — real-time NYSE tick streaming (free tier: 60 symbols)
+    finnhub_api_key: str = ""
 
     # AI
     anthropic_api_key: str = ""

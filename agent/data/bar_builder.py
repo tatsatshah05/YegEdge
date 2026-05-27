@@ -8,15 +8,13 @@ from zoneinfo import ZoneInfo
 import polars as pl
 
 IST = ZoneInfo("Asia/Kolkata")
-_MARKET_OPEN_HOUR = 9
-_MARKET_OPEN_MINUTE = 15
 
 
 @dataclass(frozen=True, slots=True)
 class ClosedBar:
     symbol: str
     timeframe: str
-    bar_open: datetime  # IST-aware bar-start timestamp
+    bar_open: datetime  # timezone-aware bar-start timestamp
     open: float
     high: float
     low: float
@@ -24,13 +22,14 @@ class ClosedBar:
     tick_count: int  # volume proxy — LTPC mode has no per-tick volume
 
     def to_dataframe(self) -> pl.DataFrame:
+        tz_key = str(self.bar_open.tzinfo) if self.bar_open.tzinfo else "Asia/Kolkata"
         return pl.DataFrame(
             {
                 "symbol": pl.Series([self.symbol], dtype=pl.Utf8),
                 "timeframe": pl.Series([self.timeframe], dtype=pl.Utf8),
                 "timestamp": pl.Series(
                     [self.bar_open],
-                    dtype=pl.Datetime("us", "Asia/Kolkata"),
+                    dtype=pl.Datetime("us", tz_key),
                 ),
                 "open": pl.Series([self.open], dtype=pl.Float64),
                 "high": pl.Series([self.high], dtype=pl.Float64),
@@ -44,11 +43,14 @@ class ClosedBar:
 
 
 class BarBuilder:
-    """Aggregates LTP ticks into OHLCV bars aligned to 9:15 IST market open.
+    """Aggregates LTP ticks into OHLCV bars aligned to a configurable market open.
 
     LTPC WebSocket mode delivers no per-tick volume; tick_count is used as a
     volume proxy. This is acceptable because TrendFollowingStrategy only uses
     price-based indicators (EMA, ATR, ADX).
+
+    NSE defaults: tz=Asia/Kolkata, market_open_hour=9, market_open_minute=15
+    NYSE defaults: tz=America/New_York, market_open_hour=9, market_open_minute=30
     """
 
     _TIMEFRAME_MINUTES: Final[dict[str, int]] = {
@@ -58,10 +60,20 @@ class BarBuilder:
         "1d": 375,  # 9:15 → 15:30 = 375 minutes
     }
 
-    def __init__(self, symbol: str, timeframe: str) -> None:
+    def __init__(
+        self,
+        symbol: str,
+        timeframe: str,
+        tz: ZoneInfo = IST,
+        market_open_hour: int = 9,
+        market_open_minute: int = 15,
+    ) -> None:
         self._symbol = symbol
         self._timeframe = timeframe
         self._bar_minutes = self._TIMEFRAME_MINUTES[timeframe]
+        self._tz = tz
+        self._market_open_hour = market_open_hour
+        self._market_open_minute = market_open_minute
         self._current_slot: datetime | None = None
         self._open: float | None = None
         self._high: float | None = None
@@ -95,16 +107,16 @@ class BarBuilder:
         return self._close_current()
 
     def _bar_start_for(self, ts: datetime) -> datetime:
-        ist = ts.astimezone(IST)
-        market_open = ist.replace(
-            hour=_MARKET_OPEN_HOUR,
-            minute=_MARKET_OPEN_MINUTE,
+        local = ts.astimezone(self._tz)
+        market_open = local.replace(
+            hour=self._market_open_hour,
+            minute=self._market_open_minute,
             second=0,
             microsecond=0,
         )
-        if ist <= market_open:
+        if local <= market_open:
             return market_open
-        elapsed = int((ist - market_open).total_seconds()) // 60
+        elapsed = int((local - market_open).total_seconds()) // 60
         slot = elapsed // self._bar_minutes
         return market_open + timedelta(minutes=slot * self._bar_minutes)
 

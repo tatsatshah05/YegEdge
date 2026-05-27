@@ -32,6 +32,7 @@ export interface SessionStatus {
   running: boolean;
   timeframe: string;
   symbols_count: number;
+  exchange: string;
   started_at: string | null;
 }
 

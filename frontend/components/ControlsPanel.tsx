@@ -9,9 +9,18 @@ interface Props {
   status: SessionStatus;
 }
 
+type Exchange = "NSE" | "NYSE";
+type Timeframe = "5m" | "15m" | "60m";
+
+const EXCHANGE_LABELS: Record<Exchange, string> = {
+  NSE: "NSE (India)",
+  NYSE: "NYSE (US)",
+};
+
 export function ControlsPanel({ status }: Props) {
   const [loading, setLoading] = useState(false);
-  const [timeframe, setTimeframe] = useState<"5m" | "15m" | "60m">("5m");
+  const [timeframe, setTimeframe] = useState<Timeframe>("5m");
+  const [exchange, setExchange] = useState<Exchange>("NSE");
   const [error, setError] = useState<string | null>(null);
 
   const startSession = async () => {
@@ -21,7 +30,7 @@ export function ControlsPanel({ status }: Props) {
       const resp = await fetch(`${API}/api/session/start`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ timeframe, warmup_bars: 100 }),
+        body: JSON.stringify({ timeframe, warmup_bars: 100, exchange }),
       });
       if (!resp.ok) {
         const data = await resp.json() as { detail?: string };
@@ -51,10 +60,14 @@ export function ControlsPanel({ status }: Props) {
     await stopSession();
   };
 
+  const isNYSE = status.running ? status.exchange === "NYSE" : exchange === "NYSE";
+
   return (
     <div className="panel" style={{ height: "100%", overflow: "hidden", display: "flex", flexDirection: "column" }}>
       <div className="panel-header">Controls</div>
       <div style={{ padding: "10px", display: "flex", flexDirection: "column", gap: "8px" }}>
+
+        {/* Status badge */}
         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
           <span className="mut" style={{ fontSize: "10px" }}>STATUS</span>
           <span
@@ -70,28 +83,79 @@ export function ControlsPanel({ status }: Props) {
           >
             {status.running ? "● LIVE" : "○ STOPPED"}
           </span>
+          {status.running && (
+            <span
+              style={{
+                padding: "2px 8px",
+                borderRadius: "3px",
+                fontSize: "10px",
+                fontWeight: 700,
+                background: isNYSE ? "#0d1f3b" : "#1b2d0d",
+                color: isNYSE ? "#58a6ff" : "#56d364",
+                border: `1px solid ${isNYSE ? "#58a6ff" : "#56d364"}`,
+              }}
+            >
+              {status.exchange ?? (isNYSE ? "NYSE" : "NSE")}
+            </span>
+          )}
         </div>
 
+        {/* Running session info */}
         {status.running && (
           <div style={{ fontSize: "11px" }} className="mut">
             {status.timeframe} bars · {status.symbols_count} symbols
             {status.started_at && (
               <> · since{" "}
-                {new Date(status.started_at).toLocaleTimeString("en-IN", {
-                  timeZone: "Asia/Kolkata",
-                  hour12: false,
-                  hour: "2-digit",
-                  minute: "2-digit",
-                })} IST
+                {new Date(status.started_at).toLocaleTimeString(
+                  isNYSE ? "en-US" : "en-IN",
+                  {
+                    timeZone: isNYSE ? "America/New_York" : "Asia/Kolkata",
+                    hour12: false,
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  }
+                )}{" "}
+                {isNYSE ? "ET" : "IST"}
               </>
             )}
           </div>
         )}
 
+        {/* Exchange selector (only when stopped) */}
+        {!status.running && (
+          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+            <span className="mut" style={{ fontSize: "10px" }}>EXCHANGE</span>
+            {(["NSE", "NYSE"] as Exchange[]).map((ex) => (
+              <button
+                key={ex}
+                onClick={() => setExchange(ex)}
+                style={{
+                  padding: "2px 10px",
+                  borderRadius: "3px",
+                  border: "1px solid",
+                  background: exchange === ex ? (ex === "NYSE" ? "#0d1f3b" : "#1b2d0d") : "transparent",
+                  borderColor: exchange === ex ? (ex === "NYSE" ? "#58a6ff" : "#56d364") : "#30363d",
+                  color: exchange === ex ? (ex === "NYSE" ? "#58a6ff" : "#56d364") : "#e6edf3",
+                  fontFamily: "inherit",
+                  fontSize: "11px",
+                  cursor: "pointer",
+                  fontWeight: 600,
+                }}
+              >
+                {ex}
+              </button>
+            ))}
+            <span className="mut" style={{ fontSize: "10px" }}>
+              {exchange === "NYSE" ? "Alpaca paper" : "Upstox/yfinance"}
+            </span>
+          </div>
+        )}
+
+        {/* Timeframe selector (only when stopped) */}
         {!status.running && (
           <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
             <span className="mut" style={{ fontSize: "10px" }}>TIMEFRAME</span>
-            {(["5m", "15m", "60m"] as const).map((tf) => (
+            {(["5m", "15m", "60m"] as Timeframe[]).map((tf) => (
               <button
                 key={tf}
                 onClick={() => setTimeframe(tf)}
@@ -114,6 +178,7 @@ export function ControlsPanel({ status }: Props) {
           </div>
         )}
 
+        {/* Action buttons */}
         <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
           {!status.running ? (
             <button
@@ -133,7 +198,7 @@ export function ControlsPanel({ status }: Props) {
                 opacity: loading ? 0.5 : 1,
               }}
             >
-              {loading ? "STARTING…" : "▶ START SESSION"}
+              {loading ? "STARTING…" : `▶ START ${exchange}`}
             </button>
           ) : (
             <>

@@ -1,0 +1,171 @@
+# NYSE/NASDAQ universe — high-liquidity S&P 500 stocks for paper trading
+# Exchange: NYSE (includes NASDAQ-listed names traded via Alpaca)
+# Timeframe: 5m primary (ORB + EMA trend following)
+# Market hours: 09:30–16:00 ET
+
+exchange: NYSE
+
+timeframes:
+  primary: "5m"
+  execution: "5m"
+
+history_bars:
+  "5m": 5000
+  "15m": 2000
+  "60m": 500
+
+benchmarks:
+  - SPY   # S&P 500 ETF
+  - QQQ   # Nasdaq-100 ETF
+
+symbols:
+  # Technology
+  - AAPL
+  - MSFT
+  - NVDA
+  - AMD
+  - INTC
+  - QCOM
+  - TXN
+  - AVGO
+  - MU
+  - AMAT
+  - LRCX
+  - KLAC
+  - ADBE
+  - CRM
+  - NOW
+  - ORCL
+  - IBM
+  - META
+  - GOOGL
+  - AMZN
+  - NFLX
+  - TSLA
+
+  # Financials
+  - JPM
+  - BAC
+  - WFC
+  - GS
+  - MS
+  - C
+  - AXP
+  - V
+  - MA
+  - PYPL
+
+  # Healthcare
+  - JNJ
+  - PFE
+  - ABBV
+  - MRK
+  - LLY
+  - AMGN
+  - GILD
+  - UNH
+  - CVS
+
+  # Energy
+  - XOM
+  - CVX
+  - COP
+  - SLB
+
+  # Consumer
+  - WMT
+  - COST
+  - HD
+  - TGT
+  - MCD
+  - KO
+  - PEP
+  - PG
+
+  # Industrials / Other
+  - BA
+  - CAT
+  - GE
+  - MMM
+  - HON
+  - UPS
+  - FDX
+  - T
+  - VZ
+  - DIS
+  - CMCSA
+
+sectors:
+  # Technology
+  AAPL: Technology
+  MSFT: Technology
+  NVDA: Technology
+  AMD: Technology
+  INTC: Technology
+  QCOM: Technology
+  TXN: Technology
+  AVGO: Technology
+  MU: Technology
+  AMAT: Technology
+  LRCX: Technology
+  KLAC: Technology
+  ADBE: Technology
+  CRM: Technology
+  NOW: Technology
+  ORCL: Technology
+  IBM: Technology
+  META: Technology
+  GOOGL: Technology
+  AMZN: Technology
+  NFLX: Technology
+  TSLA: Technology
+  # Financials
+  JPM: Financials
+  BAC: Financials
+  WFC: Financials
+  GS: Financials
+  MS: Financials
+  C: Financials
+  AXP: Financials
+  V: Financials
+  MA: Financials
+  PYPL: Financials
+  # Healthcare
+  JNJ: Healthcare
+  PFE: Healthcare
+  ABBV: Healthcare
+  MRK: Healthcare
+  LLY: Healthcare
+  AMGN: Healthcare
+  GILD: Healthcare
+  UNH: Healthcare
+  CVS: Healthcare
+  # Energy
+  XOM: Energy
+  CVX: Energy
+  COP: Energy
+  SLB: Energy
+  # Consumer
+  WMT: Consumer
+  COST: Consumer
+  HD: Consumer
+  TGT: Consumer
+  MCD: Consumer
+  KO: Consumer
+  PEP: Consumer
+  PG: Consumer
+  # Industrials / Other
+  BA: Industrials
+  CAT: Industrials
+  GE: Industrials
+  MMM: Industrials
+  HON: Industrials
+  UPS: Industrials
+  FDX: Industrials
+  T: Telecom
+  VZ: Telecom
+  DIS: Media
+  CMCSA: Media
+  # Benchmarks
+  SPY: Benchmark
+  QQQ: Benchmark

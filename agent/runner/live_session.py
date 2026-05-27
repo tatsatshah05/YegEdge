@@ -26,7 +26,7 @@ from agent.strategies.trend_following_5m import TrendFollowing5mStrategy
 logger = structlog.get_logger()
 
 IST = ZoneInfo("Asia/Kolkata")
-_SESSION_END = time(15, 30)
+_NSE_SESSION_END = time(15, 30)
 
 
 class LiveSession:
@@ -38,6 +38,11 @@ class LiveSession:
 
     Thread safety: put_tick() is safe to call from any thread (e.g., WebSocket
     callback thread). Ticks are queued and processed serially by the async loop.
+
+    Exchange defaults (NSE): session_tz=Asia/Kolkata, session_end=15:30,
+                             market_open_hour=9, market_open_minute=15
+    NYSE overrides: session_tz=America/New_York, session_end=16:00,
+                    market_open_hour=9, market_open_minute=30
     """
 
     def __init__(
@@ -51,13 +56,28 @@ class LiveSession:
         alerter: TelegramAlerter | None = None,
         heartbeat: Heartbeat | None = None,
         on_bar_closed: Callable[[object, list[object]], None] | None = None,
+        session_tz: ZoneInfo = IST,
+        session_end: time = _NSE_SESSION_END,
+        market_open_hour: int = 9,
+        market_open_minute: int = 15,
     ) -> None:
         self._symbols = symbols
         self._timeframe = timeframe
         self._portfolio = portfolio
         self._warmup_df = warmup_df
         self._pipeline = FeaturePipeline()
-        self._builders: dict[str, BarBuilder] = {s: BarBuilder(s, timeframe) for s in symbols}
+        self._session_tz = session_tz
+        self._session_end = session_end
+        self._builders: dict[str, BarBuilder] = {
+            s: BarBuilder(
+                s,
+                timeframe,
+                tz=session_tz,
+                market_open_hour=market_open_hour,
+                market_open_minute=market_open_minute,
+            )
+            for s in symbols
+        }
         # Accumulated live bars per symbol (grows as bars close during session)
         self._live_bars: dict[str, pl.DataFrame] = {s: pl.DataFrame() for s in symbols}
         self._queue: asyncio.Queue[tuple[str, float, datetime]] = asyncio.Queue()
@@ -153,8 +173,8 @@ class LiveSession:
             self._on_bar_closed_cb(bar, fills)
 
     def _is_within_session(self, ts: datetime) -> bool:
-        ist = ts.astimezone(IST)
-        return ist.time() <= _SESSION_END
+        local = ts.astimezone(self._session_tz)
+        return local.time() <= self._session_end
 
     # ------------------------------------------------------------------
     # Internal wiring

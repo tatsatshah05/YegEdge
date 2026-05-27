@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -24,6 +24,7 @@ from server.events import EventBus
 
 logger = structlog.get_logger()
 IST = ZoneInfo("Asia/Kolkata")
+ET = ZoneInfo("America/New_York")
 
 
 async def _fetch_yf_warmup(
@@ -32,11 +33,9 @@ async def _fetch_yf_warmup(
     warmup_bars: int,
     end: datetime,
 ) -> list[pl.DataFrame]:
-    """Parallel-fetch recent bars via yfinance for all symbols.
+    """Parallel-fetch recent bars via yfinance for NSE symbols (adds .NS suffix).
 
     Used as a fallback when the Parquet cache has no data for *timeframe*.
-    Fetches the last 5 calendar days so EMA/ADX/RSI indicators are warmed up
-    from bar 1 of the live session.
     """
     adapter = YFinanceAdapter()
     start = end - timedelta(days=5)
@@ -60,6 +59,69 @@ async def _fetch_yf_warmup(
     return [df for df in results if len(df) > 0]
 
 
+async def _fetch_alpaca_warmup(
+    symbols: list[str],
+    timeframe: str,
+    warmup_bars: int,
+    api_key: str,
+    api_secret: str,
+    base_url: str,
+) -> list[pl.DataFrame]:
+    """Parallel-fetch recent bars via Alpaca for NYSE symbols."""
+    from agent.data.alpaca_adapter import AlpacaAdapter
+
+    adapter = AlpacaAdapter(api_key, api_secret, base_url)
+    end = datetime.now(tz=ET)
+    start = end - timedelta(days=5)
+    loop = asyncio.get_running_loop()
+
+    async def _one(sym: str) -> pl.DataFrame:
+        try:
+            df = await loop.run_in_executor(
+                None, lambda s=sym: adapter.fetch_historical(s, timeframe, start, end)
+            )
+            return df.tail(warmup_bars) if len(df) > 0 else pl.DataFrame()
+        except Exception as exc:
+            logger.warning("session_manager.warmup_alpaca_symbol_failed", symbol=sym, error=str(exc))
+            return pl.DataFrame()
+
+    results = await asyncio.gather(*[_one(s) for s in symbols])
+    return [df for df in results if len(df) > 0]
+
+
+async def _fetch_finnhub_warmup(
+    symbols: list[str],
+    timeframe: str,
+    warmup_bars: int,
+    api_key: str,
+) -> list[pl.DataFrame]:
+    """Sequential-fetch recent bars via Finnhub REST for NYSE symbols.
+
+    Sequential (not parallel) to respect the 60 calls/minute free-tier limit.
+    """
+    from agent.data.finnhub_adapter import FinnhubAdapter
+
+    adapter = FinnhubAdapter(api_key)
+    end = datetime.now(tz=ET)
+    start = end - timedelta(days=5)
+    loop = asyncio.get_running_loop()
+    frames: list[pl.DataFrame] = []
+
+    for sym in symbols:
+        try:
+            df = await loop.run_in_executor(
+                None, lambda s=sym: adapter.fetch_historical(s, timeframe, start, end)
+            )
+            if len(df) > 0:
+                frames.append(df.tail(warmup_bars))
+            # Small delay to stay under 60 calls/minute rate limit
+            await asyncio.sleep(1.1)
+        except Exception as exc:
+            logger.warning("session_manager.warmup_finnhub_symbol_failed", symbol=sym, error=str(exc))
+
+    return frames
+
+
 class SessionManager:
     """Manages the LiveSession lifecycle and publishes events to the EventBus.
 
@@ -75,8 +137,9 @@ class SessionManager:
         self._portfolio: PortfolioTracker | None = None
         self._kill_switch: KillSwitch | None = None
         self._last_bars: dict[str, dict[str, Any]] = {}
-        self._timeframe: str = "60m"
+        self._timeframe: str = "5m"
         self._symbols: list[str] = []
+        self._exchange: str = "NSE"
         self._started_at: datetime | None = None
 
     # ------------------------------------------------------------------
@@ -121,6 +184,7 @@ class SessionManager:
             "running": self.is_running,
             "timeframe": self._timeframe,
             "symbols_count": len(self._symbols),
+            "exchange": self._exchange,
             "started_at": self._started_at.isoformat() if self._started_at else None,
         }
 
@@ -128,53 +192,120 @@ class SessionManager:
     # Lifecycle
     # ------------------------------------------------------------------
 
-    async def start(self, timeframe: str = "60m", warmup_bars: int = 100) -> None:
+    async def start(
+        self,
+        timeframe: str = "5m",
+        warmup_bars: int = 100,
+        exchange: str = "NSE",
+    ) -> None:
         """Build and start a LiveSession in the background.
 
+        exchange: "NSE" (Upstox/yfinance) or "NYSE" (Alpaca paper trading).
         Raises RuntimeError if a session is already running.
         """
         if self.is_running:
             raise RuntimeError("Session already running")
 
         settings = AppSettings()
-        today = datetime.now(tz=IST).date()
-        session_start = datetime(today.year, today.month, today.day, 9, 15, tzinfo=IST)
+        self._exchange = exchange
+
+        # --- Exchange-specific configuration ----------------------------
+        if exchange == "NYSE":
+            session_tz = ET
+            market_open_hour = 9
+            market_open_minute = 30
+            session_end = time(16, 0)
+            universe_path = Path("config/universe_nyse.yaml")
+            now = datetime.now(tz=ET)
+        else:
+            session_tz = IST
+            market_open_hour = 9
+            market_open_minute = 15
+            session_end = time(15, 30)
+            universe_path = Path("config/universe.yaml")
+            now = datetime.now(tz=IST)
+
+        today = now.date()
+        session_start = datetime(
+            today.year, today.month, today.day,
+            market_open_hour, market_open_minute,
+            tzinfo=session_tz,
+        )
 
         # --- Universe & cache warmup -----------------------------------
         cache = ParquetCache(root=settings.parquet_cache_dir)
         report = cache.coverage_report()
-        universe = UniverseLoader(Path("config/universe.yaml"))
+        universe = UniverseLoader(universe_path)
         symbols = universe.symbols()
         self._symbols = symbols
         self._timeframe = timeframe
 
         warmup_frames: list[pl.DataFrame] = []
-        for sym in symbols:
-            if sym not in report or timeframe not in report.get(sym, {}):
-                continue
-            sym_earliest, _ = report[sym][timeframe]
-            all_sym = cache.read(
-                symbol=sym, timeframe=timeframe, start=sym_earliest, end=session_start
-            )
-            if len(all_sym) == 0:
-                continue
-            warmup_frames.append(all_sym.tail(warmup_bars))
 
-        # No cached data for this timeframe — fetch the last 5 days via yfinance
-        # so indicators (EMA, ADX, RSI) are ready from bar 1 of the live session.
-        if not warmup_frames:
-            logger.info(
-                "session_manager.warmup_cache_empty_fetching_yfinance",
-                timeframe=timeframe,
-                symbols=len(symbols),
-            )
-            warmup_frames = await _fetch_yf_warmup(
-                symbols, timeframe, warmup_bars, session_start
-            )
-            logger.info(
-                "session_manager.warmup_yfinance_done",
-                symbols_loaded=len(warmup_frames),
-            )
+        if exchange == "NYSE":
+            # NYSE warmup: prefer Finnhub (sequential, rate-limited), fall back to Alpaca
+            if settings.finnhub_api_key:
+                logger.info(
+                    "session_manager.warmup_finnhub_fetching",
+                    timeframe=timeframe,
+                    symbols=len(symbols),
+                )
+                warmup_frames = await _fetch_finnhub_warmup(
+                    symbols, timeframe, warmup_bars, settings.finnhub_api_key
+                )
+                logger.info(
+                    "session_manager.warmup_finnhub_done",
+                    symbols_loaded=len(warmup_frames),
+                )
+            elif settings.alpaca_api_key:
+                logger.info(
+                    "session_manager.warmup_alpaca_fetching",
+                    timeframe=timeframe,
+                    symbols=len(symbols),
+                )
+                warmup_frames = await _fetch_alpaca_warmup(
+                    symbols,
+                    timeframe,
+                    warmup_bars,
+                    settings.alpaca_api_key,
+                    settings.alpaca_api_secret,
+                    settings.alpaca_base_url,
+                )
+                logger.info(
+                    "session_manager.warmup_alpaca_done",
+                    symbols_loaded=len(warmup_frames),
+                )
+            else:
+                logger.warning(
+                    "session_manager.warmup_nyse_skipped_no_keys",
+                    note="indicators will be cold for first ~30 bars",
+                )
+        else:
+            # NSE: warmup from Parquet cache, fall back to yfinance
+            for sym in symbols:
+                if sym not in report or timeframe not in report.get(sym, {}):
+                    continue
+                sym_earliest, _ = report[sym][timeframe]
+                all_sym = cache.read(
+                    symbol=sym, timeframe=timeframe, start=sym_earliest, end=session_start
+                )
+                if len(all_sym) == 0:
+                    continue
+                warmup_frames.append(all_sym.tail(warmup_bars))
+
+            if not warmup_frames:
+                logger.info(
+                    "session_manager.warmup_cache_empty_fetching_yfinance",
+                    timeframe=timeframe,
+                    symbols=len(symbols),
+                )
+                warmup_frames = await _fetch_yf_warmup(
+                    symbols, timeframe, warmup_bars, session_start
+                )
+                logger.info(
+                    "session_manager.warmup_yfinance_done",
+                    symbols_loaded=len(warmup_frames),
+                )
 
         warmup_df = pl.concat(warmup_frames) if warmup_frames else pl.DataFrame()
 
@@ -226,7 +357,7 @@ class SessionManager:
             manager._background_tasks.add(t)
             t.add_done_callback(manager._background_tasks.discard)
 
-            # Publish fill events — Fill fields: symbol, action, quantity, fill_price, order_id
+            # Publish fill events
             for fill in fills:
                 t = asyncio.create_task(
                     bus.publish({
@@ -271,11 +402,34 @@ class SessionManager:
             alerter=alerter,
             kill_switch=self._kill_switch,
             on_bar_closed=on_bar_closed,
+            session_tz=session_tz,
+            session_end=session_end,
+            market_open_hour=market_open_hour,
+            market_open_minute=market_open_minute,
         )
 
-        if settings.broker == "yfinance":
-            adapter: YFinanceAdapter = YFinanceAdapter()
-            logger.info("session_manager.adapter", broker="yfinance")
+        # --- Adapter selection ----------------------------------------
+        if exchange == "NYSE":
+            if settings.finnhub_api_key:
+                from agent.data.finnhub_adapter import FinnhubAdapter
+                adapter = FinnhubAdapter(api_key=settings.finnhub_api_key)
+                logger.info("session_manager.adapter", broker="finnhub", exchange="NYSE")
+            elif settings.alpaca_api_key:
+                from agent.data.alpaca_adapter import AlpacaAdapter
+                adapter = AlpacaAdapter(
+                    api_key=settings.alpaca_api_key,
+                    api_secret=settings.alpaca_api_secret,
+                    base_url=settings.alpaca_base_url,
+                )
+                logger.info("session_manager.adapter", broker="alpaca", exchange="NYSE")
+            else:
+                self._session = None
+                raise RuntimeError(
+                    "No NYSE data source configured. Set FINNHUB_API_KEY in .env."
+                )
+        elif settings.broker == "yfinance":
+            adapter = YFinanceAdapter()
+            logger.info("session_manager.adapter", broker="yfinance", exchange="NSE")
         else:
             if not settings.upstox_access_token:
                 self._session = None
@@ -284,7 +438,10 @@ class SessionManager:
                 )
             from agent.data.upstox_adapter import UpstoxAdapter
             adapter = UpstoxAdapter(access_token=settings.upstox_access_token)
-            logger.info("session_manager.adapter", broker="upstox")
+            logger.info("session_manager.adapter", broker="upstox", exchange="NSE")
+
+        # Tick timezone fallback — Alpaca ticks are UTC-aware, Upstox may be naive
+        tick_tz = session_tz
 
         async def _run() -> None:
             def on_tick_df(df: pl.DataFrame) -> None:
@@ -294,7 +451,7 @@ class SessionManager:
                 ltp = float(df["ltp"][0])
                 ts = df["timestamp"][0]
                 if hasattr(ts, "tzinfo") and ts.tzinfo is None:
-                    ts = ts.replace(tzinfo=IST)
+                    ts = ts.replace(tzinfo=tick_tz)
                 if manager._session is not None:
                     manager._session.put_tick(sym, ltp, ts)
 
@@ -322,14 +479,19 @@ class SessionManager:
                     pass
 
         self._task = asyncio.create_task(_run())
-        self._started_at = datetime.now(tz=IST)
+        self._started_at = datetime.now(tz=session_tz)
 
         await bus.publish({
             "type": "session_started",
             "ts": self._started_at.isoformat(),
-            "data": {"timeframe": timeframe, "symbols": symbols},
+            "data": {"timeframe": timeframe, "symbols": symbols, "exchange": exchange},
         })
-        logger.info("session_manager.started", timeframe=timeframe, symbols=len(symbols))
+        logger.info(
+            "session_manager.started",
+            timeframe=timeframe,
+            symbols=len(symbols),
+            exchange=exchange,
+        )
 
     async def stop(self) -> None:
         """Gracefully stop the running session (10-second timeout then cancel)."""
