@@ -20,7 +20,8 @@ from agent.portfolio.tracker import PortfolioTracker
 from agent.risk.manager import RiskManager
 from agent.risk.rules import load_risk_rules
 from agent.runner.daily_loop import DailyLoop
-from agent.strategies.trend_following import TrendFollowingStrategy
+from agent.strategies.orb import ORBStrategy
+from agent.strategies.trend_following_5m import TrendFollowing5mStrategy
 
 logger = structlog.get_logger()
 
@@ -168,7 +169,7 @@ class LiveSession:
     ) -> DailyLoop:
         journal_path = Path("./data/journal.db")
         journal_path.parent.mkdir(parents=True, exist_ok=True)
-        strategy = TrendFollowingStrategy()
+        strategies = [ORBStrategy(), TrendFollowing5mStrategy()]
         risk_manager = RiskManager(rules=load_risk_rules())
         executor = PaperExecution()
         journal = JournalStore(db_path=journal_path)
@@ -177,7 +178,7 @@ class LiveSession:
         _kill_switch = kill_switch or KillSwitch(flag_path=Path("./data/.kill_switch"))
 
         return DailyLoop(
-            strategy=strategy,
+            strategies=strategies,
             risk_manager=risk_manager,
             executor=executor,
             portfolio=portfolio,

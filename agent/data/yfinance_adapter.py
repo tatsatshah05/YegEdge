@@ -17,14 +17,16 @@ logger = structlog.get_logger()
 IST = ZoneInfo("Asia/Kolkata")
 
 YFINANCE_INTERVAL_MAP: Final[dict[str, str]] = {
+    "5m": "5m",
     "15m": "15m",
     "60m": "1h",
     "1d": "1d",
 }
 
 # Data retention limits in yfinance (approximate)
-# 15m → 60 days, 60m → 730 days, 1d → full history
+# 5m → 60 days, 15m → 60 days, 60m → 730 days, 1d → full history
 YFINANCE_HISTORY_LIMIT_DAYS: Final[dict[str, int]] = {
+    "5m": 59,
     "15m": 59,
     "60m": 729,
     "1d": 3650,

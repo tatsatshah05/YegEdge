@@ -22,7 +22,8 @@ from agent.portfolio.tracker import PortfolioTracker
 from agent.risk.manager import RiskManager
 from agent.risk.types import RiskVerdict
 from agent.runner.types import DailySessionResult
-from agent.strategies.trend_following import TrendFollowingStrategy
+from agent.strategies.base import BaseStrategy
+from agent.strategies.types import Signal
 
 logger = structlog.get_logger()
 
@@ -49,7 +50,7 @@ class DailyLoop:
     def __init__(
         self,
         *,
-        strategy: TrendFollowingStrategy,
+        strategies: list[BaseStrategy],
         risk_manager: RiskManager,
         executor: PaperExecution,
         portfolio: PortfolioTracker,
@@ -59,7 +60,7 @@ class DailyLoop:
         heartbeat: Heartbeat,
         alerter: TelegramAlerter,
     ) -> None:
-        self._strategy = strategy
+        self._strategies = strategies
         self._risk_manager = risk_manager
         self._executor = executor
         self._portfolio = portfolio
@@ -83,7 +84,9 @@ class DailyLoop:
         if len(df) < 2:
             return []
 
-        signals = self._strategy.generate(df)
+        signals: list[Signal] = []
+        for strategy in self._strategies:
+            signals.extend(strategy.generate(df))
         if not signals:
             self._last_signals = 0
             self._last_decisions = 0

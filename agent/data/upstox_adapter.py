@@ -27,6 +27,7 @@ IST = ZoneInfo("Asia/Kolkata")
 # Public constant — maps our internal timeframe strings to Upstox v3 API params
 # ---------------------------------------------------------------------------
 UPSTOX_TIMEFRAME_MAP: Final[dict[str, tuple[str, int]]] = {
+    "5m": ("minutes", 5),
     "15m": ("minutes", 15),
     "60m": ("hours", 1),
     "1d": ("days", 1),

@@ -11,7 +11,7 @@ interface Props {
 
 export function ControlsPanel({ status }: Props) {
   const [loading, setLoading] = useState(false);
-  const [timeframe, setTimeframe] = useState<"15m" | "60m">("60m");
+  const [timeframe, setTimeframe] = useState<"5m" | "15m" | "60m">("5m");
   const [error, setError] = useState<string | null>(null);
 
   const startSession = async () => {
@@ -91,7 +91,7 @@ export function ControlsPanel({ status }: Props) {
         {!status.running && (
           <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
             <span className="mut" style={{ fontSize: "10px" }}>TIMEFRAME</span>
-            {(["15m", "60m"] as const).map((tf) => (
+            {(["5m", "15m", "60m"] as const).map((tf) => (
               <button
                 key={tf}
                 onClick={() => setTimeframe(tf)}

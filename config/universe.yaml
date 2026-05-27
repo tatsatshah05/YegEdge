@@ -1,8 +1,7 @@
 # =============================================================================
 # Trading universe — NSE equity intraday only (V1)
 # =============================================================================
-# Curated liquid Nifty 50 / Next 50 names. Universe is intentionally narrow
-# in V1 — liquidity quality > breadth at this capital size.
+# Nifty 50 + Nifty Next 50 — 100 most liquid NSE large-caps.
 # =============================================================================
 
 exchange: "NSE"
@@ -10,17 +9,17 @@ segment: "EQ"             # equity cash; intraday MIS orders only in V1
 
 # Bar timeframes the system uses.
 timeframes:
-  primary: "60m"          # decisions made on 1-hour bars
-  execution: "15m"        # entry timing on 15-min
+  primary: "5m"           # decisions made on 5-min bars
+  execution: "5m"         # entry timing on 5-min
   daily: "1d"             # for regime, drawdown, end-of-day reporting
 
 # Lookback history (bars).
 history_bars:
-  60m: 8000               # ~4 years
+  5m:  5000               # ~7 trading days
   15m: 32000              # ~2 years
   1d:  1250               # ~5 years
 
-# Universe — Nifty 50 majors (high liquidity, low spread).
+# Universe — Nifty 50 + Nifty Next 50 (100 symbols).
 symbols:
   # Banks & financials
   - HDFCBANK
@@ -29,6 +28,21 @@ symbols:
   - KOTAKBANK
   - AXISBANK
   - BAJFINANCE
+  - INDUSINDBK
+  - BAJAJFINSV
+  - HDFCLIFE
+  - SBILIFE
+  - SHRIRAMFIN
+  - CHOLAFIN
+  - MUTHOOTFIN
+  - ICICIPRULI
+  - ICICIGI
+  - PNB
+  - BANKBARODA
+  - CANBK
+  - RECLTD
+  - JIOFIN
+  - BAJAJHFL
 
   # IT
   - TCS
@@ -36,41 +50,96 @@ symbols:
   - WIPRO
   - HCLTECH
   - TECHM
+  - LTIM
+  - LTTS
+  - PERSISTENT
+  - COFORGE
+  - MPHASIS
+  - NAUKRI
+  - OFSS
 
   # Energy / oil
   - RELIANCE
   - ONGC
   - NTPC
   - POWERGRID
+  - BPCL
+  - COALINDIA
+  - TATAPOWER
+  - VEDL
 
   # FMCG / consumer
   - HINDUNILVR
   - ITC
   - NESTLEIND
   - BRITANNIA
+  - DABUR
+  - MARICO
+  - GODREJCP
+  - TATACONSUM
+  - VBL
+  - MCDOWELL-N
 
   # Auto
   - MARUTI
   - M&M
   - BAJAJ-AUTO
+  - TATAMOTORS
+  - EICHERMOT
+  - HEROMOTOCO
+  - TVSMOTOR
+  - BOSCHLTD
+  - MOTHERSON
 
   # Metals
   - TATASTEEL
   - JSWSTEEL
   - HINDALCO
+  - JINDALSTEL
+  - SAIL
 
-  # Pharma
+  # Pharma / healthcare
   - SUNPHARMA
   - DRREDDY
   - CIPLA
+  - LUPIN
+  - TORNTPHARM
+  - MANKIND
+  - APOLLOHOSP
+  - MAXHEALTH
 
-  # Industrial / cement
+  # Industrial / cement / infra
   - LT
   - ULTRACEMCO
   - GRASIM
+  - AMBUJACEM
+  - SIEMENS
+  - BEL
+  - ADANIPORTS
+  - ADANIENT
 
   # Telecom
   - BHARTIARTL
+  - INDUSTOWER
+
+  # Consumer / lifestyle
+  - ASIANPAINT
+  - BERGEPAINT
+  - TITAN
+  - TRENT
+  - HAVELLS
+  - VOLTAS
+  - PIDILITIND
+  - PAGEIND
+  - DMART
+  - INDHOTEL
+  - IRCTC
+  - ZOMATO
+
+  # Real estate
+  - DLF
+  - LODHA
+  - GODREJPROP
 
 # Benchmark series (always fetched for regime detection and relative strength).
 benchmarks:
@@ -80,38 +149,115 @@ benchmarks:
 
 # Sector classifications — used for sector-exposure caps.
 sectors:
+  # Financials
   HDFCBANK: financials
   ICICIBANK: financials
   SBIN: financials
   KOTAKBANK: financials
   AXISBANK: financials
   BAJFINANCE: financials
+  INDUSINDBK: financials
+  BAJAJFINSV: financials
+  HDFCLIFE: financials
+  SBILIFE: financials
+  SHRIRAMFIN: financials
+  CHOLAFIN: financials
+  MUTHOOTFIN: financials
+  ICICIPRULI: financials
+  ICICIGI: financials
+  PNB: financials
+  BANKBARODA: financials
+  CANBK: financials
+  RECLTD: financials
+  JIOFIN: financials
+  BAJAJHFL: financials
+  # IT
   TCS: it
   INFY: it
   WIPRO: it
   HCLTECH: it
   TECHM: it
+  LTIM: it
+  LTTS: it
+  PERSISTENT: it
+  COFORGE: it
+  MPHASIS: it
+  NAUKRI: it
+  OFSS: it
+  # Energy
   RELIANCE: energy
   ONGC: energy
+  BPCL: energy
+  COALINDIA: energy
+  TATAPOWER: energy
+  VEDL: energy
   NTPC: utilities
   POWERGRID: utilities
+  # FMCG
   HINDUNILVR: fmcg
   ITC: fmcg
   NESTLEIND: fmcg
   BRITANNIA: fmcg
+  DABUR: fmcg
+  MARICO: fmcg
+  GODREJCP: fmcg
+  TATACONSUM: fmcg
+  VBL: fmcg
+  MCDOWELL-N: fmcg
+  # Auto
   MARUTI: auto
   M&M: auto
   BAJAJ-AUTO: auto
+  TATAMOTORS: auto
+  EICHERMOT: auto
+  HEROMOTOCO: auto
+  TVSMOTOR: auto
+  BOSCHLTD: auto
+  MOTHERSON: auto
+  # Metals
   TATASTEEL: metals
   JSWSTEEL: metals
   HINDALCO: metals
+  JINDALSTEL: metals
+  SAIL: metals
+  # Pharma
   SUNPHARMA: pharma
   DRREDDY: pharma
   CIPLA: pharma
+  LUPIN: pharma
+  TORNTPHARM: pharma
+  MANKIND: pharma
+  APOLLOHOSP: healthcare
+  MAXHEALTH: healthcare
+  # Industrial
   LT: industrial
   ULTRACEMCO: industrial
   GRASIM: industrial
+  AMBUJACEM: industrial
+  SIEMENS: industrial
+  BEL: industrial
+  ADANIPORTS: industrial
+  ADANIENT: industrial
+  # Telecom
   BHARTIARTL: telecom
+  INDUSTOWER: telecom
+  # Consumer
+  ASIANPAINT: consumer
+  BERGEPAINT: consumer
+  TITAN: consumer
+  TRENT: consumer
+  HAVELLS: consumer
+  VOLTAS: consumer
+  PIDILITIND: consumer
+  PAGEIND: consumer
+  DMART: consumer
+  INDHOTEL: consumer
+  IRCTC: consumer
+  ZOMATO: consumer
+  # Real estate
+  DLF: realestate
+  LODHA: realestate
+  GODREJPROP: realestate
 
 # ETFs available for hedging / cash-equivalent positioning (V2+).
 hedging_instruments:

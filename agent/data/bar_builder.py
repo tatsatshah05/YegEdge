@@ -52,6 +52,7 @@ class BarBuilder:
     """
 
     _TIMEFRAME_MINUTES: Final[dict[str, int]] = {
+        "5m": 5,
         "15m": 15,
         "60m": 60,
         "1d": 375,  # 9:15 → 15:30 = 375 minutes
