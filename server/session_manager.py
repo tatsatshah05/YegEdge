@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -24,6 +24,40 @@ from server.events import EventBus
 
 logger = structlog.get_logger()
 IST = ZoneInfo("Asia/Kolkata")
+
+
+async def _fetch_yf_warmup(
+    symbols: list[str],
+    timeframe: str,
+    warmup_bars: int,
+    end: datetime,
+) -> list[pl.DataFrame]:
+    """Parallel-fetch recent bars via yfinance for all symbols.
+
+    Used as a fallback when the Parquet cache has no data for *timeframe*.
+    Fetches the last 5 calendar days so EMA/ADX/RSI indicators are warmed up
+    from bar 1 of the live session.
+    """
+    adapter = YFinanceAdapter()
+    start = end - timedelta(days=5)
+    loop = asyncio.get_running_loop()
+
+    async def _one(sym: str) -> pl.DataFrame:
+        try:
+            df = await loop.run_in_executor(
+                None, lambda s=sym: adapter.fetch_historical(s, timeframe, start, end)
+            )
+            return df.tail(warmup_bars) if len(df) > 0 else pl.DataFrame()
+        except Exception as exc:
+            logger.warning(
+                "session_manager.warmup_yf_symbol_failed",
+                symbol=sym,
+                error=str(exc),
+            )
+            return pl.DataFrame()
+
+    results = await asyncio.gather(*[_one(s) for s in symbols])
+    return [df for df in results if len(df) > 0]
 
 
 class SessionManager:
@@ -125,6 +159,22 @@ class SessionManager:
             if len(all_sym) == 0:
                 continue
             warmup_frames.append(all_sym.tail(warmup_bars))
+
+        # No cached data for this timeframe — fetch the last 5 days via yfinance
+        # so indicators (EMA, ADX, RSI) are ready from bar 1 of the live session.
+        if not warmup_frames:
+            logger.info(
+                "session_manager.warmup_cache_empty_fetching_yfinance",
+                timeframe=timeframe,
+                symbols=len(symbols),
+            )
+            warmup_frames = await _fetch_yf_warmup(
+                symbols, timeframe, warmup_bars, session_start
+            )
+            logger.info(
+                "session_manager.warmup_yfinance_done",
+                symbols_loaded=len(warmup_frames),
+            )
 
         warmup_df = pl.concat(warmup_frames) if warmup_frames else pl.DataFrame()
 
