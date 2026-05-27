@@ -47,7 +47,7 @@ _OHLCV_SCHEMA: Final[dict[str, type[pl.DataType]]] = {
 }
 
 _REQUIRED_INSTRUMENT_COLUMNS: Final[frozenset[str]] = frozenset(
-    {"tradingsymbol", "exchange", "isin"}
+    {"trading_symbol", "segment", "instrument_key"}
 )
 
 
@@ -143,15 +143,14 @@ class UpstoxAdapter(BrokerAdapter):
             If *symbol* is not found in the NSE EQ instrument master.
         """
         matches = self._instruments.filter(
-            (pl.col("tradingsymbol") == symbol) & (pl.col("exchange") == "NSE")
+            (pl.col("trading_symbol") == symbol) & (pl.col("segment") == "NSE_EQ")
         )
         if len(matches) == 0:
             raise KeyError(
                 f"Symbol '{symbol}' not found in NSE instrument master. "
                 "Refresh the instruments cache or verify the symbol name."
             )
-        isin: str = matches["isin"][0]
-        return f"NSE_EQ|{isin}"
+        return str(matches["instrument_key"][0])
 
     def _instrument_key_to_symbol(self, instrument_key: str) -> str:
         """Return the NSE trading symbol for a given Upstox instrument key.
@@ -163,13 +162,12 @@ class UpstoxAdapter(BrokerAdapter):
         KeyError
             If the ISIN derived from *instrument_key* is not found.
         """
-        _, isin = instrument_key.split("|", maxsplit=1)
-        matches = self._instruments.filter(pl.col("isin") == isin)
+        matches = self._instruments.filter(pl.col("instrument_key") == instrument_key)
         if len(matches) == 0:
             raise KeyError(
-                f"ISIN '{isin}' (from key '{instrument_key}') not found in instrument master."
+                f"Instrument key '{instrument_key}' not found in instrument master."
             )
-        return str(matches["tradingsymbol"][0])
+        return str(matches["trading_symbol"][0])
 
     # ------------------------------------------------------------------
     # BrokerAdapter: fetch_historical
