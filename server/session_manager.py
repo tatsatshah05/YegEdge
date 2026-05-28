@@ -13,7 +13,6 @@ import structlog
 from agent.data.bar_builder import ClosedBar
 from agent.data.cache import ParquetCache
 from agent.data.universe import UniverseLoader
-from agent.data.yfinance_adapter import YFinanceAdapter
 from agent.execution.types import Fill
 from agent.monitoring.alerter import TelegramAlerter
 from agent.monitoring.kill_switch import KillSwitch
@@ -27,33 +26,36 @@ IST = ZoneInfo("Asia/Kolkata")
 ET = ZoneInfo("America/New_York")
 
 
-async def _fetch_yf_warmup(
+async def _fetch_upstox_warmup(
+    adapter: Any,
     symbols: list[str],
     timeframe: str,
     warmup_bars: int,
     end: datetime,
 ) -> list[pl.DataFrame]:
-    """Parallel-fetch recent bars via yfinance for NSE symbols (adds .NS suffix).
+    """Parallel-fetch recent bars via Upstox REST for NSE symbols.
 
-    Used as a fallback when the Parquet cache has no data for *timeframe*.
+    Limits concurrency to 5 simultaneous requests to avoid overwhelming the API.
+    Gracefully skips symbols that fail (e.g., not found in instrument master).
     """
-    adapter = YFinanceAdapter()
-    start = end - timedelta(days=5)
+    start = end - timedelta(days=7)
     loop = asyncio.get_running_loop()
+    semaphore = asyncio.Semaphore(5)
 
     async def _one(sym: str) -> pl.DataFrame:
-        try:
-            df = await loop.run_in_executor(
-                None, lambda s=sym: adapter.fetch_historical(s, timeframe, start, end)
-            )
-            return df.tail(warmup_bars) if len(df) > 0 else pl.DataFrame()
-        except Exception as exc:
-            logger.warning(
-                "session_manager.warmup_yf_symbol_failed",
-                symbol=sym,
-                error=str(exc),
-            )
-            return pl.DataFrame()
+        async with semaphore:
+            try:
+                df = await loop.run_in_executor(
+                    None, lambda s=sym: adapter.fetch_historical(s, timeframe, start, end)
+                )
+                return df.tail(warmup_bars) if len(df) > 0 else pl.DataFrame()
+            except Exception as exc:
+                logger.warning(
+                    "session_manager.warmup_upstox_symbol_failed",
+                    symbol=sym,
+                    error=str(exc),
+                )
+                return pl.DataFrame()
 
     results = await asyncio.gather(*[_one(s) for s in symbols])
     return [df for df in results if len(df) > 0]
@@ -114,10 +116,16 @@ async def _fetch_finnhub_warmup(
             )
             if len(df) > 0:
                 frames.append(df.tail(warmup_bars))
-            # Small delay to stay under 60 calls/minute rate limit
             await asyncio.sleep(1.1)
         except Exception as exc:
-            logger.warning("session_manager.warmup_finnhub_symbol_failed", symbol=sym, error=str(exc))
+            err = str(exc)
+            if "403" in err or "Forbidden" in err:
+                logger.warning(
+                    "session_manager.warmup_finnhub_403_skipping",
+                    note="Finnhub free tier does not support intraday candles — starting without warmup",
+                )
+                return []
+            logger.warning("session_manager.warmup_finnhub_symbol_failed", symbol=sym, error=err)
 
     return frames
 
@@ -200,7 +208,7 @@ class SessionManager:
     ) -> None:
         """Build and start a LiveSession in the background.
 
-        exchange: "NSE" (Upstox/yfinance) or "NYSE" (Alpaca paper trading).
+        exchange: "NSE" (Upstox only) or "NYSE" (Finnhub/Alpaca).
         Raises RuntimeError if a session is already running.
         """
         if self.is_running:
@@ -231,6 +239,21 @@ class SessionManager:
             market_open_hour, market_open_minute,
             tzinfo=session_tz,
         )
+
+        # --- NSE: create Upstox adapter early (downloads instrument master once) ---
+        nse_adapter: Any = None
+        if exchange == "NSE":
+            if not settings.upstox_access_token:
+                raise RuntimeError(
+                    "UPSTOX_ACCESS_TOKEN is not set. Run daily login."
+                )
+            from agent.data.upstox_adapter import UpstoxAdapter as _UpstoxAdapterCls
+            _loop = asyncio.get_running_loop()
+            nse_adapter = await _loop.run_in_executor(
+                None,
+                lambda: _UpstoxAdapterCls(access_token=settings.upstox_access_token),
+            )
+            logger.info("session_manager.upstox_instruments.loaded")
 
         # --- Universe & cache warmup -----------------------------------
         cache = ParquetCache(root=settings.parquet_cache_dir)
@@ -281,7 +304,7 @@ class SessionManager:
                     note="indicators will be cold for first ~30 bars",
                 )
         else:
-            # NSE: warmup from Parquet cache, fall back to yfinance
+            # NSE: warmup from Parquet cache, fall back to Upstox REST
             for sym in symbols:
                 if sym not in report or timeframe not in report.get(sym, {}):
                     continue
@@ -295,15 +318,15 @@ class SessionManager:
 
             if not warmup_frames:
                 logger.info(
-                    "session_manager.warmup_cache_empty_fetching_yfinance",
+                    "session_manager.warmup_cache_empty_fetching_upstox",
                     timeframe=timeframe,
                     symbols=len(symbols),
                 )
-                warmup_frames = await _fetch_yf_warmup(
-                    symbols, timeframe, warmup_bars, session_start
+                warmup_frames = await _fetch_upstox_warmup(
+                    nse_adapter, symbols, timeframe, warmup_bars, session_start
                 )
                 logger.info(
-                    "session_manager.warmup_yfinance_done",
+                    "session_manager.warmup_upstox_done",
                     symbols_loaded=len(warmup_frames),
                 )
 
@@ -427,17 +450,8 @@ class SessionManager:
                 raise RuntimeError(
                     "No NYSE data source configured. Set FINNHUB_API_KEY in .env."
                 )
-        elif settings.broker == "yfinance":
-            adapter = YFinanceAdapter()
-            logger.info("session_manager.adapter", broker="yfinance", exchange="NSE")
-        else:
-            if not settings.upstox_access_token:
-                self._session = None
-                raise RuntimeError(
-                    "UPSTOX_ACCESS_TOKEN is not set. Run daily login or set BROKER=yfinance."
-                )
-            from agent.data.upstox_adapter import UpstoxAdapter
-            adapter = UpstoxAdapter(access_token=settings.upstox_access_token)
+        else:  # NSE — reuse the adapter created before warmup
+            adapter = nse_adapter
             logger.info("session_manager.adapter", broker="upstox", exchange="NSE")
 
         # Tick timezone fallback — Alpaca ticks are UTC-aware, Upstox may be naive

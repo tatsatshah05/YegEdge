@@ -110,7 +110,7 @@ class LiveSession:
             try:
                 symbol, ltp, ts = await asyncio.wait_for(self._queue.get(), timeout=5.0)
             except TimeoutError:
-                if not self._is_within_session(datetime.now(tz=IST)):
+                if not self._is_within_session(datetime.now(tz=self._session_tz)):
                     break
                 continue
 
@@ -174,7 +174,8 @@ class LiveSession:
 
     def _is_within_session(self, ts: datetime) -> bool:
         local = ts.astimezone(self._session_tz)
-        return local.time() <= self._session_end
+        today = datetime.now(tz=self._session_tz).date()
+        return local.date() == today and local.time() <= self._session_end
 
     # ------------------------------------------------------------------
     # Internal wiring
