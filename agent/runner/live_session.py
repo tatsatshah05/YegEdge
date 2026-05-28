@@ -164,11 +164,16 @@ class LiveSession:
         live_sym = self._live_bars[bar.symbol]
         raw_window = pl.concat([sym_warmup, live_sym]) if len(sym_warmup) > 0 else live_sym
 
-        if len(raw_window) < 2:
-            return
+        # Always notify about the bar close so last_bars and the event feed update.
+        # Strategy processing only runs when there is enough data for indicators.
+        fills: list = []
+        if len(raw_window) >= 2:
+            try:
+                enriched = self._pipeline.run(raw_window)
+                fills = self._loop.process_bar(enriched, evaluation_time=bar.bar_open)
+            except Exception:
+                logger.exception("live_session.bar_processing_error", symbol=bar.symbol)
 
-        enriched = self._pipeline.run(raw_window)
-        fills = self._loop.process_bar(enriched, evaluation_time=bar.bar_open)
         if self._on_bar_closed_cb is not None:
             self._on_bar_closed_cb(bar, fills)
 
